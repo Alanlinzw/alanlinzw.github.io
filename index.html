@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#3B82F6"/>
+    <title>高效待办清单 - PWA</title>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+    
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="images/icons/icon-192x192.png">
+    <link rel="icon" href="/favicon.ico" type="image/x-icon">
+    <link rel="shortcut icon" href="/favicon.ico" type="image/x-icon">
+
+    <link rel="stylesheet" href="style.css">
+    
+</head>
+<body>
+
+    <div class="container">
+        <div class="main-header">
+            <h1>高效待办清单</h1>
+            <div class="header-actions">
+                <!-- 始终显示的按钮 -->
+                <button id="sync-drive-btn" title="与云端同步" class="always-visible-action">
+                    <img src="images/icon-drive.svg" alt="云端同步">
+                </button>
+                <span id="sync-status" class="always-visible-action"></span>
+
+                <button id="toggle-notifications-btn" title="开启桌面提醒" class="always-visible-action">
+                    <img src="images/icon-notifications-off.svg" alt="Notifications">
+                </button>
+
+                <button id="theme-toggle-btn" title="切换主题" class="always-visible-action">
+                    <img src="images/icon-theme.svg" alt="Theme">
+                </button>
+
+                <!-- “更多”按钮，在移动端显示 -->
+                <button id="more-actions-btn" class="more-actions-toggle" title="更多操作">
+                    <img src="images/icon-more-dots.svg" alt="More">
+                </button>
+
+                <div id="more-actions-menu" class="more-actions-dropdown">
+                    <button id="faq-btn" title="常见问题与帮助">
+                        <img src="images/icon-faq.svg" alt="FAQ">
+                        <span>常见问题</span>
+                    </button>
+                    <button id="features-btn" title="功能与亮点">
+                        <img src="images/icon-features.svg" alt="Features">
+                        <span>功能亮点</span>
+                    </button>
+                    <button id="feedback-btn" title="反馈与建议">
+                        <img src="images/icon-feedback.svg" alt="Feedback">
+                        <span>反馈建议</span>
+                    </button>
+                    <button id="donate-btn" title="赞赏支持">
+                        <img src="images/icon-donate.svg" alt="Donate">
+                        <span>赞赏支持</span>
+                    </button>
+                <a href="https://alanlinzw.github.io/privacy-policy-for-chrome-extension/" target="_blank" rel="noopener noreferrer">隐私政策 (Privacy Policy)</a>
+                <a href="https://alanlinzw.github.io/terms-of-service/" target="_blank" rel="noopener noreferrer">服务条款 (Terms of Service)</a> 
+                </div>
+            </div>
+        </div>
+        
+        <div class="search-container">
+            <img src="images/icon-search.svg" alt="Search" class="search-icon">
+            <input type="search" id="main-search-input" placeholder="搜索所有内容...">
+        </div>
+        
+        <!-- Sections will be shown/hidden by JS -->
+        <div class="section" id="daily-section">
+            <div class="section-header">
+                <img src="images/icon-daily.svg" alt="每日">
+                <h2>每日清单 <span id="daily-title-date" class="header-date"></span></h2>
+            </div>
+            <div class="input-area">
+                <input type="text" id="new-daily-task-input" placeholder="输入每日重复任务...">
+                <button id="add-daily-task-btn" title="添加任务">+</button>
+            </div>
+            <ul id="daily-task-list" class="task-list"></ul>
+        </div>
+
+        <div class="section" id="monthly-section">
+            <div class="section-header"> 
+                <img src="images/icon-monthly.svg" alt="本月">
+                <h2 id="monthly-header-title">本月待办</h2>
+                <div class="section-header-main-actions" style="margin-left: auto; display: flex; align-items: center; gap: var(--spacing-sm);">
+                    <button id="stats-btn" class="header-icon-btn" title="统计分析">
+                        <img src="images/icon-stats.svg" alt="Stats">
+                    </button>
+                    <button id="sort-monthly-by-priority-btn" class="header-icon-btn" title="按优先级排序">
+                        <img src="images/icon-sort-priority.svg" alt="Sort by Priority">
+                    </button>
+                    <button id="monthly-history-btn" class="header-icon-btn" title="查看历史记录">
+                        <img src="images/icon-history.svg" alt="History">
+                    </button>
+                </div>
+            </div> 
+
+            <div class="section-toolbar header-actions-group"> 
+                <button id="export-monthly-history-btn" class="header-action-btn-small" title="将所有历史归档导出为 Excel 文件">导出历史</button>
+                <button id="import-monthly-btn" class="header-action-btn-small" title="从 Excel 文件导入任务到当前月份">导入数据</button>
+                <a id="download-monthly-template-btn" class="header-action-btn-small" title="下载用于导入的 Excel 模板">下载模板</a>
+                <input type="file" id="import-monthly-file-input" class="hidden-file-input" accept=".xlsx, .xls">
+            </div>
+  
+            <div id="monthly-tags-container" class="tags-container"></div>
+            <div class="input-area monthly-input-area">
+                <input type="text" id="new-monthly-task-input" placeholder="输入本月要完成的事项...">
+                <input type="text" id="new-monthly-tags-input" placeholder="标签, 用逗号分隔 (可选)">
+                <button id="add-monthly-task-btn" title="添加待办">+</button>
+            </div>
+            <ul id="monthly-task-list" class="task-list"></ul>
+        </div> 
+
+        <div class="section" id="future-section">
+             <div class="section-header">
+                <img src="images/icon-future.svg" alt="未来">
+                <h2>未来计划</h2>
+            </div>
+            <div class="input-area future-input-area has-datetime-picker">
+                <input type="text" id="new-future-task-input" placeholder="输入计划内容...">
+                <input type="datetime-local" id="task-datetime-input">
+                <button id="add-future-task-btn" title="新增计划">+</button>
+            </div>
+            <ul id="future-task-list" class="task-list"></ul>
+        </div>
+
+        <div class="section" id="ledger-section">
+            <div class="section-header">
+                <img src="images/icon-ledger.svg" alt="记账">
+                <h2 id="ledger-header-title">记账本</h2>
+                <div class="section-header-main-actions" style="margin-left: auto; display: flex; align-items: center; gap: var(--spacing-sm);">
+                    <button id="currency-picker-btn" class="currency-picker" title="切换货币">
+                        <img src="images/icon-currency.svg" alt="Switch Currency">
+                    </button>
+                    <button id="ledger-history-btn" class="header-icon-btn" title="查看历史记录">
+                        <img src="images/icon-history.svg" alt="History">
+                    </button>
+                </div>
+            </div>
+            
+            <div class="section-toolbar">
+                <button id="set-budget-btn" class="header-action-btn-small" title="设置本月预算">设置预算</button>
+                <button id="annual-report-btn" class="header-action-btn-small" title="查看年度报告">年度报告</button>
+                <div style="margin-left: auto;"></div>
+                <button id="export-ledger-history-btn" class="header-action-btn-small" title="将所有账本历史导出为 Excel 文件">导出历史</button>
+                <button id="import-ledger-btn" class="header-action-btn-small" title="从 Excel 文件导入记录到当前账本">导入数据</button>
+                <a id="download-ledger-template-btn" class="header-action-btn-small" title="下载用于导入的 Excel 模板">下载模板</a>
+                <input type="file" id="import-ledger-file-input" class="hidden-file-input" accept=".xlsx, .xls">
+            </div>
+
+            <div id="ledger-summary-container" class="ledger-summary">
+                <h3 class="summary-title">本月统计</h3>
+                <div id="ledger-summary-total" class="summary-total"></div>
+                <div id="ledger-summary-breakdown" class="summary-breakdown"></div>
+            </div>
+            <div id="ledger-tags-container" class="tags-container"></div>
+            <div class="input-area ledger-input-area">
+                <input type="date" id="ledger-date-input" title="日期">
+                <input type="text" id="ledger-item-input" placeholder="项目 (如: 餐饮)">
+                <input type="number" id="ledger-amount-input" placeholder="金额 ($)" step="0.01">
+                <input type="text" id="ledger-payment-input" placeholder="付款方式 (如: 微信)">
+                <input type="text" id="ledger-details-input" placeholder="详情 (选填)">
+                <button id="add-ledger-btn" title="添加记录">+</button>
+            </div>
+            <ul id="ledger-list" class="ledger-table">
+                <li class="ledger-header">
+                    <span>日期</span>
+                    <span>项目</span>
+                    <span>金额</span>
+                    <span>付款方式</span>
+                    <span>详情</span>
+                    <span>操作</span>
+                </li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <div id="stats-modal" class="modal-overlay hidden">
+        <div class="modal-content stats-modal-content">
+             <button id="stats-modal-close-btn" class="modal-close">×</button>
+             <div class="stats-header"><h1>统计报告</h1></div>
+             <div class="stats-grid">
+                 <div class="chart-card">
+                     <div class="chart-header">
+                         <h2>已完成任务趋势 (按标签)</h2>
+                         <div id="task-completion-timespan-selector" class="timespan-selector">
+                             <button data-span="daily" data-period="30" class="active">近30天 (日)</button>
+                             <button data-span="weekly" data-period="26">近半年 (周)</button>
+                             <button data-span="monthly" data-period="12">近1年 (月)</button>
+                             <button data-span="yearly" data-period="5">近5年 (年)</button>
+                         </div>
+                     </div>
+                     <div class="chart-canvas-container"><canvas id="taskCompletionByTagChart"></canvas></div>
+                 </div>
+                 <div class="chart-card">
+                     <div class="chart-header">
+                         <h2>已完成任务标签分布</h2>
+                         <div id="task-tag-distribution-timespan-selector" class="timespan-selector">
+                            <button data-period="today" class="active">今日</button>
+                            <button data-period="thisMonth">本月</button>
+                            <button data-period="thisYear">今年</button>
+                        </div>
+                     </div>
+                     <div class="chart-canvas-container"><canvas id="taskTagDistributionChart"></canvas></div>
+                 </div>
+             </div> <!-- .stats-grid 结束 -->
+        </div> <!-- .modal-content stats-modal-content 结束 -->
+    </div> <!-- #stats-modal modal-overlay 结束 -->
+    
+    <div id="donate-modal" class="modal-overlay hidden">
+        <div class="modal-content has-sticky-footer">
+            <button id="modal-close-btn" class="modal-close">×</button>
+            <h2>赞赏支持</h2>
+            <p>如果这个应用对你有帮助，可以请我喝杯咖啡！</p>
+            <img src="images/wechat_qr.png" alt="微信收款二维码" class="qr-code">
+        </div>
+    </div>
+    <div id="features-modal" class="modal-overlay hidden">
+        <div class="modal-content features-modal-content has-sticky-footer">
+            <button id="features-modal-close-btn" class="modal-close">×</button>
+            <h2>功能 & 亮点</h2>
+            <ul id="features-list" class="features-list-style"></ul>
+        </div>
+    </div>
+    <div id="history-modal" class="modal-overlay hidden">
+        <div class="modal-content history-modal-content has-sticky-footer">
+            <button id="history-modal-close-btn" class="modal-close">×</button>
+            <h2 id="history-modal-title">选择历史月份</h2>
+            <div class="history-calendar-nav">
+                <button id="history-prev-year-btn"><</button>
+                <span id="history-current-year">2024</span>
+                <button id="history-next-year-btn">></button>
+            </div>
+            <div id="history-months-grid" class="history-months-grid"></div>
+            <p class="modal-footer">（点击有记录的月份进行查看）</p>
+        </div>
+    </div>
+    <div id="custom-prompt-modal" class="modal-overlay hidden">
+        <div class="modal-content custom-prompt-content has-sticky-footer">
+            <button id="custom-prompt-close-btn" class="modal-close">×</button>
+            <h2 id="custom-prompt-title">Modal Title</h2>
+            <p id="custom-prompt-message" class="custom-prompt-message"></p>
+            <div id="custom-prompt-input-container" class="custom-prompt-input-area"></div>
+            <div id="custom-prompt-actions" class="custom-prompt-actions">
+                <button id="custom-prompt-confirm-btn" class="custom-prompt-btn custom-prompt-confirm">Confirm</button>
+                <button id="custom-prompt-cancel-btn" class="custom-prompt-btn custom-prompt-cancel">Cancel</button>
+            </div>
+        </div>
+    </div>
+    <div id="faq-modal" class="modal-overlay hidden">
+        <div class="modal-content faq-modal-content has-sticky-footer">
+            <button id="faq-modal-close-btn" class="modal-close">×</button>
+            <h2>常见问题与帮助</h2>
+            <div id="faq-list" class="faq-list"></div>
+        </div>
+    </div>
+    <div id="annual-report-modal" class="modal-overlay hidden">
+        <div class="modal-content annual-report-content has-sticky-footer">
+            <button id="annual-report-close-btn" class="modal-close">×</button>
+            <div class="chart-header">
+                <h2 id="annual-report-title">年度报告</h2>
+                <div class="history-calendar-nav">
+                    <button id="annual-report-prev-year-btn"><</button>
+                    <span id="annual-report-current-year">2024</span>
+                    <button id="annual-report-next-year-btn">></button>
+                </div>
+            </div>
+            <div id="annual-report-summary" class="ledger-summary" style="margin-bottom: var(--spacing-lg);"></div>
+            <div id="annual-report-details" class="faq-list"></div>
+        </div>
+    </div>
+
+ <!-- 底部标签栏 -->
+    <nav class="bottom-tab-nav">
+        <a href="#daily-section" class="tab-item active" data-section="daily-section"><img src="images/icon-daily.svg" alt="每日清单"><span class="tab-label">每日清单</span></a>
+        <a href="#monthly-section" class="tab-item" data-section="monthly-section"><img src="images/icon-monthly.svg" alt="本月待办"><span class="tab-label">本月待办</span></a>
+        <a href="#future-section" class="tab-item" data-section="future-section"><img src="images/icon-future.svg" alt="未来计划"><span class="tab-label">未来计划</span></a>
+        <a href="#ledger-section" class="tab-item" data-section="ledger-section"><img src="images/icon-ledger.svg" alt="记账本"><span class="tab-label">记账本</span></a>
+    </nav>
+
+    <!-- 第三方库 -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="xlsx.full.min.js"></script>
+    <script src="Sortable.min.js"></script>
+    <!-- Google API Client and Identity Services -->
+    <script async defer src="https://apis.google.com/js/api.js"></script>
+    <script async defer src="https://accounts.google.com/gsi/client"></script>
+
+
+    <!-- 应用主逻辑 (已包含统计逻辑) -->
+    <script src="app.js"></script>
+    
+    <!-- PWA Service Worker 注册脚本 -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('/sw.js')
+                    .then(registration => console.log('PWA Service Worker registered successfully:', registration))
+                    .catch(error => console.log('PWA Service Worker registration failed:', error));
+            });
+        }
+
+        // Tab Navigation Logic
+        document.addEventListener('DOMContentLoaded', () => {
+            const tabItems = document.querySelectorAll('.tab-item');
+            const sections = document.querySelectorAll('.section');
+            const defaultSectionId = 'daily-section'; // Default section to show
+
+            function showSection(sectionIdToShow) {
+                sections.forEach(section => {
+                    section.style.display = 'none';
+                });
+
+                const activeSection = document.getElementById(sectionIdToShow);
+                if (activeSection) {
+                    activeSection.style.display = 'block';
+                    const container = document.querySelector('.container');
+                    if (container) {
+                        if (!document.documentElement.classList.contains('dashboard-mode') && window.innerWidth >= 769 && document.body.style.width === '700px'){
+                            // Popup mode, do nothing or scroll body
+                        } else {
+                            window.scrollTo({ top: 0, behavior: 'smooth' });
+                        }
+                    }
+                } else {
+                    console.warn(`Section with ID "${sectionIdToShow}" not found.`);
+                }
+
+                tabItems.forEach(tab => {
+                    tab.classList.remove('active');
+                    if (tab.dataset.section === sectionIdToShow) {
+                        tab.classList.add('active');
+                    }
+                });
+            }
+
+            tabItems.forEach(tab => {
+                tab.addEventListener('click', (event) => {
+                    event.preventDefault(); 
+                    const sectionId = tab.dataset.section;
+                    if (sectionId) {
+                        showSection(sectionId);
+                        // history.pushState(null, null, `#${sectionId}`); // Optional
+                    }
+                });
+            });
+
+            let initialSectionId = defaultSectionId;
+            if (window.location.hash) {
+                const hashSectionId = window.location.hash.substring(1); 
+                const sectionExists = Array.from(sections).some(s => s.id === hashSectionId);
+                if (sectionExists) {
+                    initialSectionId = hashSectionId;
+                }
+            }
+            showSection(initialSectionId);
+        });
+    </script>
+</body>
+</html>
