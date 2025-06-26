@@ -86,8 +86,6 @@ const driveSync = {
     driveFileId: null,
     gapi: null, // 将在此模块外部由 loadGoogleApis 函数设置
     gisOAuth2: null, // 将在此模块外部由 loadGoogleApis 函数设置
-    _gapiInitialized: false, // 新增一个标志来跟踪 gapi.client.init 的状态
-    _driveApiLoaded: false, // 新增一个标志来跟踪 Drive API 是否已加载
 
     initClients: async function() {
         console.log("driveSync.initClients: Method invoked.");
@@ -127,163 +125,43 @@ const driveSync = {
         });
     },
 
-        // 辅助函数，确保 GAPI client 和 Drive API 已加载
-    ensureGapiClientReady: async function() {
-        if (!driveSync.gapi) {
-            throw new Error("GAPI library not loaded.");
-        }
-        if (!driveSync.gisOAuth2) {
-            throw new Error("GIS library not loaded.");
-        }
-
-        // 确保 gapi.client 已初始化
-        if (!driveSync._gapiInitialized) { // 使用标志来避免重复初始化
-            console.log("ensureGapiClientReady: Initializing gapi.client...");
-            await driveSync.gapi.client.init({
-                discoveryDocs: driveSync.DISCOVERY_DOCS,
-            });
-            driveSync._gapiInitialized = true;
-            console.log("ensureGapiClientReady: gapi.client initialized.");
-        }
-
-        // 确保 Drive API 已加载
-        if (!driveSync.gapi.client.drive && !driveSync._driveApiLoaded) { // 检查 drive API 是否已挂载到 client，并且是否已尝试加载
-            console.log("ensureGapiClientReady: Loading Drive API v3...");
-            await driveSync.gapi.client.load('drive', 'v3');
-            driveSync._driveApiLoaded = true; // 标记 Drive API 已加载
-            console.log("ensureGapiClientReady: Drive API v3 loaded.");
-        } else if (driveSync.gapi.client.drive) {
-            // console.log("ensureGapiClientReady: Drive API already loaded.");
-        }
-    },
-
-authenticate: async function() {
-        console.log("driveSync.authenticate: Authenticating...");
-        try {
-            await driveSync.ensureGapiClientReady(); // 确保 GAPI 客户端和 Drive API 已准备好
-        } catch (e) {
-            console.error("driveSync.authenticate: Failed to ensure GAPI client ready:", e);
-            throw new Error(`GAPI client setup failed before authentication: ${e.message}`);
-        }
-
-        if (!driveSync.tokenClient) {
-             console.error("driveSync.authenticate: GIS Token Client not initialized.");
-             throw new Error("driveSync.authenticate: GIS Token Client not initialized.");
-        }
-
+    authenticate: async function() {
         return new Promise((resolve, reject) => {
-            driveSync.tokenClient.callback = async (tokenResponse) => { // GIS 返回的是 TokenResponse 对象
-                console.log('[driveSync.authenticate] TokenClient Callback Fired. Response:', JSON.parse(JSON.stringify(tokenResponse))); // 打印完整的tokenResponse
-    if (tokenResponse.error !== undefined) {
-        let errorMessage = 'Google Auth Error: ' + tokenResponse.error;
-        if (tokenResponse.details) errorMessage += '; Details: ' + tokenResponse.details;
-        // ... (你的错误处理逻辑) ...
-        console.error("driveSync.authenticate: Token response error:", errorMessage);
-        reject(new Error(errorMessage)); // 确保 reject
-    } else {
-        if (tokenResponse && tokenResponse.access_token) {
-            console.log("driveSync.authenticate: Access token received:", tokenResponse.access_token.substring(0, 20) + "..."); // 打印部分令牌以确认
-            try {
-                driveSync.gapi.client.setToken(tokenResponse); // 直接传递 TokenResponse 对象
-                console.log("driveSync.authenticate: gapi.client.setToken(tokenResponse) called successfully.");
-                
- // 验证一下 getToken 是否能取回我们刚设置的 (可选调试步骤)
-                const retrievedToken = driveSync.gapi.client.getToken();
-                if (retrievedToken && retrievedToken.access_token === tokenResponse.access_token) {
-                    console.log("driveSync.authenticate: Token successfully set and retrieved from gapi.client.");
+            if (!driveSync.gapi || !driveSync.gapi.client) {
+                 return reject(new Error("driveSync.authenticate: GAPI client not initialized."));
+            }
+            if (!driveSync.tokenClient) {
+                 return reject(new Error("driveSync.authenticate: GIS Token Client not initialized."));
+            }
+            driveSync.tokenClient.callback = async (resp) => { 
+                if (resp.error !== undefined) {
+                    let errorMessage = 'Google Auth Error: ' + resp.error;
+                    if (resp.details) errorMessage += '; Details: ' + resp.details;
+                    if (resp.error === "popup_closed_by_user" || resp.error === "access_denied" || resp.error === "user_logged_out" || resp.error === "user_signed_out") {
+                        errorMessage = "用户取消了授权、拒绝了访问或已登出。";
+                    } else if (resp.error === "popup_failed_to_open") {
+                         errorMessage = "无法打开授权窗口，请检查浏览器是否阻止了弹出窗口。";
+                    }
+                    reject(new Error(errorMessage));
                 } else {
-                    console.warn("driveSync.authenticate: Token set but retrieval from gapi.client failed or mismatch.", retrievedToken);
+                    resolve({ success: true });
                 }
-                
-                resolve({ success: true, tokenData: tokenResponse });
-            } catch (e) {
-                const errMsg = "driveSync.authenticate: Error calling gapi.client.setToken().";
-                console.error(errMsg, e, tokenResponse);
-                reject(new Error(errMsg + " Details: " + e.message));
-            }
-        } else {
-            const errMsg = "driveSync.authenticate: Token response successful but access_token missing in response.";
-            console.error(errMsg, tokenResponse);
-            reject(new Error(errMsg));
-        }
-    }
-};
-
-            // 检查当前是否有有效的令牌
-            const currentGapiToken = driveSync.gapi.client.getToken();
-            let needsPrompt = true;
-            if (currentGapiToken && currentGapiToken.access_token) {
-                // 你可以添加一个检查令牌是否即将过期的逻辑，如果接近过期，则强制刷新
-                // 但 GIS 通常会在需要时自动处理刷新，或者在 requestAccessToken 时根据情况处理
-                console.log("driveSync.authenticate: Found existing GAPI token. Will attempt request without explicit prompt unless necessary.");
-                needsPrompt = false; // 假设现有令牌可能有效，让 requestAccessToken 决定是否需要交互
-            }
-            
-            // 如果需要显式提示用户（例如，首次授权或令牌确定已失效）
-            // const promptType = needsPrompt ? 'consent' : ''; // 或 'select_account'
-            // 或者总是让GIS决定是否需要prompt，可以传空字符串或不传prompt参数
-            driveSync.tokenClient.requestAccessToken({ prompt: needsPrompt ? 'consent' : '' });
-            console.log("driveSync.authenticate: requestAccessToken called. Prompt type:", needsPrompt ? 'consent' : '(GIS default)');
+            };
+            const currentToken = driveSync.gapi.client.getToken();
+            const promptType = (!currentToken || currentToken.access_token === "") ? 'consent' : '';
+            driveSync.tokenClient.requestAccessToken({ prompt: promptType });
         });
     },
 
- findOrCreateFile: async function() {
-        console.log("[driveSync.findOrCreateFile] Called.");
-        let response; // 将 response 声明在 try 块外部，以便后续 if/else 可以访问
-
-        try { // 外层 try 用于捕获所有准备阶段和 API 调用阶段的错误
-            await driveSync.ensureGapiClientReady(); // 确保 GAPI 客户端和 Drive API 已准备好
-            console.log("[driveSync.findOrCreateFile] ensureGapiClientReady completed.");
-
-            const currentToken = driveSync.gapi.client.getToken();
-            if (!currentToken || !currentToken.access_token) {
-                console.error("[driveSync.findOrCreateFile] CRITICAL: No access token found in gapi.client before API call.");
-                throw new Error("No valid access token available before making Drive API call.");
-            } else {
-                console.log("[driveSync.findOrCreateFile] Access token available in gapi.client:", currentToken.access_token.substring(0, 10) + "...");
-            }
-
-            if (!driveSync.gapi || !driveSync.gapi.client || !driveSync.gapi.client.drive) {
-                console.error("[driveSync.findOrCreateFile] Google Drive API client (gapi.client.drive) not ready.");
-                throw new Error("Google Drive API client (gapi.client.drive) not ready for findOrCreateFile.");
-            }
-
-            console.log("[driveSync.findOrCreateFile] Proceeding with files.list call...");
-            response = await driveSync.gapi.client.drive.files.list({ // 注意这里赋值给外部声明的 response
-                q: `name='${driveSync.DRIVE_FILE_NAME}' and 'appDataFolder' in parents`,
-                spaces: 'appDataFolder',
-                fields: 'files(id, name)'
-            });
-            console.log("[driveSync.findOrCreateFile] files.list response:", response);
-
-            // 处理 files.list 的结果
-            if (response && response.result && response.result.files && response.result.files.length > 0) {
-                driveSync.driveFileId = response.result.files[0].id;
-                console.log("[driveSync.findOrCreateFile] Found existing file with ID:", driveSync.driveFileId);
-                return driveSync.driveFileId;
-            } else {
-                console.log("[driveSync.findOrCreateFile] No existing file found. Creating new file...");
-                const createResponse = await driveSync.gapi.client.drive.files.create({
-                    resource: { name: driveSync.DRIVE_FILE_NAME, parents: ['appDataFolder'] },
-                    fields: 'id'
-                });
-                driveSync.driveFileId = createResponse.result.id;
-                console.log("[driveSync.findOrCreateFile] Created new file with ID:", driveSync.driveFileId);
-                return driveSync.driveFileId;
-            }
-
-        } catch (error) { // 统一的 catch 块
-            console.error("[driveSync.findOrCreateFile] Error during operation:", error);
-            // 检查是否是 Google API 返回的特定错误结构
-            if (error && error.result && error.result.error) {
-                console.error("[driveSync.findOrCreateFile] Google API Error details:", JSON.stringify(error.result.error));
-                // 可以根据 error.result.error.status 或 code 抛出更具体的错误
-                throw new Error(`Google API Error: ${error.result.error.message} (Status: ${error.result.error.status})`);
-            }
-            // 如果不是标准的 Google API 错误结构，则抛出原始错误或包装后的错误
-            throw error; // 重新抛出，让上层捕获
+    findOrCreateFile: async function() {
+        if (!driveSync.gapi || !driveSync.gapi.client || !driveSync.gapi.client.drive) {
+            throw new Error("driveSync.findOrCreateFile: Google Drive API client (driveSync.gapi.client.drive) not ready.");
         }
-    },
+        const response = await driveSync.gapi.client.drive.files.list({
+            q: `name='${driveSync.DRIVE_FILE_NAME}' and 'appDataFolder' in parents`,
+            spaces: 'appDataFolder',
+            fields: 'files(id, name)'
+        });
         if (response.result.files && response.result.files.length > 0) {
             driveSync.driveFileId = response.result.files[0].id;
             return driveSync.driveFileId;
@@ -298,9 +176,6 @@ authenticate: async function() {
     },
 
     upload: async function(data) {
-                try {
-            await driveSync.ensureGapiClientReady();
-        } catch (e) { /* ... */ throw new Error(`GAPI client setup failed before upload: ${e.message}`); }
         if (!driveSync.driveFileId) throw new Error("driveSync.upload: No Drive file ID.");
         if (!driveSync.gapi || !driveSync.gapi.client) {
             throw new Error("driveSync.upload: Google API client (driveSync.gapi.client) not ready.");
@@ -323,9 +198,6 @@ authenticate: async function() {
     },
 
     download: async function() {
-                try {
-            await driveSync.ensureGapiClientReady();
-        } catch (e) { /* ... */ throw new Error(`GAPI client setup failed before download: ${e.message}`); }
         if (!driveSync.driveFileId) return null;
         if (!driveSync.gapi || !driveSync.gapi.client || !driveSync.gapi.client.drive) {
             throw new Error("driveSync.download: Google Drive API client (driveSync.gapi.client.drive) not ready.");
@@ -375,21 +247,12 @@ async function loadGoogleApis() {
             }
 
             if (gapiReady && gisReady) {
-                            try {
-                // driveSync.initClients() 内部会初始化 GAPI Client 和 GIS Token Client
-                // GAPI Client 初始化后，我们还需要确保 Drive API 被加载
-                console.log("loadGoogleApis: Both GAPI and GIS are ready. Initializing DriveSync clients and ensuring Drive API is loaded...");
-                await driveSync.initClients(); // 这个函数内部有 gapi.client.init 和 initTokenClient
-                driveSync._gapiInitialized = true; // 标记 gapi.client.init 已完成
-
-                console.log("loadGoogleApis: DriveSync clients initialized. Loading Drive API...");
-                await driveSync.gapi.client.load('drive', 'v3');
-                driveSync._driveApiLoaded = true; // 标记 Drive API 已加载
-                console.log("loadGoogleApis: Drive API v3 loaded successfully.");
-                
-                resolve({ gapi: driveSync.gapi, gisOAuth2: driveSync.gisOAuth2 });
-            } catch (initError) {
-    
+                try {
+                    console.log("loadGoogleApis: Both GAPI and GIS are ready. Initializing DriveSync clients...");
+                    await driveSync.initClients(); // 在这里调用 driveSync.initClients
+                    console.log("loadGoogleApis: DriveSync clients initialized successfully.");
+                    resolve({ gapi: driveSync.gapi, gisOAuth2: driveSync.gisOAuth2 });
+                } catch (initError) {
                     console.error("loadGoogleApis: Error during driveSync.initClients:", initError);
                     reject(new Error(`Failed to initialize Google API clients after loading libraries: ${initError.message}`));
                 }
