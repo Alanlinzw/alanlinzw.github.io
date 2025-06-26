@@ -219,6 +219,64 @@ const driveSync = {
 };
 
 // ========================================================================
+// >>>>>>>>>>>>>>>>> 在这里定义 loadGoogleApis 函数 <<<<<<<<<<<<<<<<<
+// ========================================================================
+async function loadGoogleApis() {
+    console.log("loadGoogleApis: Attempting to load Google APIs...");
+    return new Promise((resolve, reject) => {
+        // 等待全局 gapi 和 google.accounts.oauth2 对象可用
+        // 这些对象是由 index.html 中通过 <script src="..."> 加载的 Google 脚本定义的
+
+        let gapiReady = false;
+        let gisReady = false;
+        let attempts = 0;
+        const maxAttempts = 50; // 大约 5 秒超时 (50 * 100ms)
+        const intervalTime = 100;
+
+        const checkLibraries = async () => {
+            if (typeof gapi !== 'undefined' && gapi.load) { // 检查 gapi 是否已加载且可用
+                driveSync.gapi = gapi; // 将全局 gapi 赋给 driveSync 模块
+                gapiReady = true;
+                console.log("loadGoogleApis: GAPI library is ready.");
+            }
+
+            if (typeof google !== 'undefined' && google.accounts && google.accounts.oauth2 && google.accounts.oauth2.initTokenClient) { // 检查 GIS 是否已加载且可用
+                driveSync.gisOAuth2 = google.accounts.oauth2; // 将全局 GIS OAuth2 赋给 driveSync 模块
+                gisReady = true;
+                console.log("loadGoogleApis: Google Identity Services (GIS) OAuth2 is ready.");
+            }
+
+            if (gapiReady && gisReady) {
+                try {
+                    console.log("loadGoogleApis: Both GAPI and GIS are ready. Initializing DriveSync clients...");
+                    await driveSync.initClients(); // 在这里调用 driveSync.initClients
+                    console.log("loadGoogleApis: DriveSync clients initialized successfully.");
+                    resolve({ gapi: driveSync.gapi, gisOAuth2: driveSync.gisOAuth2 });
+                } catch (initError) {
+                    console.error("loadGoogleApis: Error during driveSync.initClients:", initError);
+                    reject(new Error(`Failed to initialize Google API clients after loading libraries: ${initError.message}`));
+                }
+                return;
+            }
+
+            attempts++;
+            if (attempts >= maxAttempts) {
+                let errorMsg = "loadGoogleApis: Timeout loading Google APIs. ";
+                if (!gapiReady) errorMsg += "GAPI not available. ";
+                if (!gisReady) errorMsg += "GIS not available. ";
+                console.error(errorMsg);
+                reject(new Error(errorMsg.trim()));
+                return;
+            }
+
+            setTimeout(checkLibraries, intervalTime);
+        };
+
+        checkLibraries(); // 开始检查
+    });
+}
+
+// ========================================================================
 // 2. 状态变量和常量定义
 // ========================================================================
 let allTasks = {};
