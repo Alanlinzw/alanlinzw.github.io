@@ -1,0 +1,16 @@
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <!-- 账本主体 -->
+  <rect x="20" y="16" width="24" height="32" rx="2" fill="#ffffff" stroke="#2c3e50" stroke-width="2"/>
+  
+  <!-- 装订线 -->
+  <line x1="20" y1="16" x2="20" y2="48" stroke="#2c3e50" stroke-width="2"/>
+  
+  <!-- 表格线条 -->
+  <line x1="24" y1="24" x2="40" y2="24" stroke="#bdc3c7" stroke-width="1"/>
+  <line x1="24" y1="32" x2="40" y2="32" stroke="#bdc3c7" stroke-width="1"/>
+  <line x1="24" y1="40" x2="40" y2="40" stroke="#bdc3c7" stroke-width="1"/>
+  
+  <!-- 收支符号 -->
+  <text x="28" y="30" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#27ae60">+</text>
+  <text x="28" y="38" font-family="Arial, sans-serif" font-size="10" font-weight="bold" fill="#e74c3c">-</text>
+</svg>

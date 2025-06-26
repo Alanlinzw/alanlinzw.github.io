@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+  <!-- 太阳光线 -->
+  <g opacity="0.8">
+    <line x1="12" y1="1" x2="12" y2="3"/>
+    <line x1="12" y1="21" x2="12" y2="23"/>
+    <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/>
+    <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/>
+    <line x1="1" y1="12" x2="3" y2="12"/>
+    <line x1="21" y1="12" x2="23" y2="12"/>
+    <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
+    <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>
+  </g>
+  
+  <!-- 太阳/月亮的主体 -->
+  <circle cx="12" cy="12" r="5"/>
+  
+  <!-- 月亮的阴影部分 -->
+  <path d="M12 7a5 5 0 1 0 0 10 3.5 3.5 0 0 1 0-10z" fill="currentColor" opacity="0.3"/>
+  
+  <!-- 月亮表面的小圆点 -->
+  <circle cx="10" cy="9" r="0.5" fill="currentColor" opacity="0.6"/>
+  <circle cx="14" cy="11" r="0.3" fill="currentColor" opacity="0.4"/>
+  <circle cx="11" cy="14" r="0.4" fill="currentColor" opacity="0.5"/>
+</svg>
