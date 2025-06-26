@@ -227,61 +227,63 @@ authenticate: async function() {
         });
     },
 
-    findOrCreateFile: async function() {
-            console.log("[driveSync.findOrCreateFile] Called.");
-        try {
-            await driveSync.ensureGapiClientReady(); // 确保 GAPI 客户端和 Drive API 已准备好
-                    console.log("[driveSync.findOrCreateFile] ensureGapiClientReady completed.");
-        } catch (e) {
-            console.error("driveSync.findOrCreateFile: Failed to ensure GAPI client ready:", e);
-            throw new Error(`GAPI client setup failed before findOrCreateFile: ${e.message}`);
-        }
-          const currentToken = driveSync.gapi.client.getToken();
-        if (!currentToken || !currentToken.access_token) {
-            console.error("[driveSync.findOrCreateFile] CRITICAL: No access token found in gapi.client before API call. Authentication might have failed or token not set.");
-            // 可以选择在这里再次尝试认证，或者直接抛出错误
-            // await driveSync.authenticate(); // 再次尝试认证
-            // const refreshedToken = driveSync.gapi.client.getToken();
-            // if (!refreshedToken || !refreshedToken.access_token) {
-            //     throw new Error("Failed to obtain a valid access token even after re-authentication attempt.");
-            // }
-            // console.log("[driveSync.findOrCreateFile] Token re-fetched/verified:", refreshedToken.access_token.substring(0,10)+"...");
-            throw new Error("No valid access token available before making Drive API call.");
-        } else {
-            console.log("[driveSync.findOrCreateFile] Access token available in gapi.client:", currentToken.access_token.substring(0, 10) + "...");
-        }
+ findOrCreateFile: async function() {
+        console.log("[driveSync.findOrCreateFile] Called.");
+        let response; // 将 response 声明在 try 块外部，以便后续 if/else 可以访问
 
-    } catch (e) {
-        console.error("driveSync.findOrCreateFile: Failed during GAPI client readiness check or token check:", e);
-        throw new Error(`GAPI client setup/token check failed before findOrCreateFile: ${e.message}`);
-    }
-        if (!driveSync.gapi || !driveSync.gapi.client || !driveSync.gapi.client.drive) { // 再次检查
-        console.error("[driveSync.findOrCreateFile] Google Drive API client (driveSync.gapi.client.drive) not ready.");
-        throw new Error("driveSync.findOrCreateFile: Google Drive API client (driveSync.gapi.client.drive) not ready.");
-    }
-    console.log("[driveSync.findOrCreateFile] Proceeding with files.list call...");
+        try { // 外层 try 用于捕获所有准备阶段和 API 调用阶段的错误
+            await driveSync.ensureGapiClientReady(); // 确保 GAPI 客户端和 Drive API 已准备好
+            console.log("[driveSync.findOrCreateFile] ensureGapiClientReady completed.");
+
+            const currentToken = driveSync.gapi.client.getToken();
+            if (!currentToken || !currentToken.access_token) {
+                console.error("[driveSync.findOrCreateFile] CRITICAL: No access token found in gapi.client before API call.");
+                throw new Error("No valid access token available before making Drive API call.");
+            } else {
+                console.log("[driveSync.findOrCreateFile] Access token available in gapi.client:", currentToken.access_token.substring(0, 10) + "...");
+            }
+
+            if (!driveSync.gapi || !driveSync.gapi.client || !driveSync.gapi.client.drive) {
+                console.error("[driveSync.findOrCreateFile] Google Drive API client (gapi.client.drive) not ready.");
+                throw new Error("Google Drive API client (gapi.client.drive) not ready for findOrCreateFile.");
+            }
+
+            console.log("[driveSync.findOrCreateFile] Proceeding with files.list call...");
+            response = await driveSync.gapi.client.drive.files.list({ // 注意这里赋值给外部声明的 response
+                q: `name='${driveSync.DRIVE_FILE_NAME}' and 'appDataFolder' in parents`,
+                spaces: 'appDataFolder',
+                fields: 'files(id, name)'
+            });
+            console.log("[driveSync.findOrCreateFile] files.list response:", response);
+
+            // 处理 files.list 的结果
+            if (response && response.result && response.result.files && response.result.files.length > 0) {
+                driveSync.driveFileId = response.result.files[0].id;
+                console.log("[driveSync.findOrCreateFile] Found existing file with ID:", driveSync.driveFileId);
+                return driveSync.driveFileId;
+            } else {
+                console.log("[driveSync.findOrCreateFile] No existing file found. Creating new file...");
+                const createResponse = await driveSync.gapi.client.drive.files.create({
+                    resource: { name: driveSync.DRIVE_FILE_NAME, parents: ['appDataFolder'] },
+                    fields: 'id'
+                });
+                driveSync.driveFileId = createResponse.result.id;
+                console.log("[driveSync.findOrCreateFile] Created new file with ID:", driveSync.driveFileId);
+                return driveSync.driveFileId;
+            }
+
+        } catch (error) { // 统一的 catch 块
+            console.error("[driveSync.findOrCreateFile] Error during operation:", error);
+            // 检查是否是 Google API 返回的特定错误结构
+            if (error && error.result && error.result.error) {
+                console.error("[driveSync.findOrCreateFile] Google API Error details:", JSON.stringify(error.result.error));
+                // 可以根据 error.result.error.status 或 code 抛出更具体的错误
+                throw new Error(`Google API Error: ${error.result.error.message} (Status: ${error.result.error.status})`);
+            }
+            // 如果不是标准的 Google API 错误结构，则抛出原始错误或包装后的错误
+            throw error; // 重新抛出，让上层捕获
         }
-        const response = await driveSync.gapi.client.drive.files.list({
-            q: `name='${driveSync.DRIVE_FILE_NAME}' and 'appDataFolder' in parents`,
-            spaces: 'appDataFolder',
-            fields: 'files(id, name)'
-        });
-    try {
-        const response = await driveSync.gapi.client.drive.files.list({
-            q: `name='${driveSync.DRIVE_FILE_NAME}' and 'appDataFolder' in parents`,
-            spaces: 'appDataFolder',
-            fields: 'files(id, name)'
-        });
-        console.log("[driveSync.findOrCreateFile] files.list response:", response);
-        // ... (处理 response)
-    } catch (apiError) {
-        console.error("[driveSync.findOrCreateFile] Error during drive.files.list API call:", apiError);
-        // 检查 apiError.result.error 对象，它可能包含更详细的错误信息
-        if (apiError.result && apiError.result.error) {
-            console.error("[driveSync.findOrCreateFile] Google API Error details:", JSON.stringify(apiError.result.error));
-        }
-        throw apiError; // 重新抛出，让上层捕获
-    }
+    },
         if (response.result.files && response.result.files.length > 0) {
             driveSync.driveFileId = response.result.files[0].id;
             return driveSync.driveFileId;
