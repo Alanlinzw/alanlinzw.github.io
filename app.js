@@ -173,26 +173,41 @@ authenticate: async function() {
 
         return new Promise((resolve, reject) => {
             driveSync.tokenClient.callback = async (tokenResponse) => { // GIS 返回的是 TokenResponse 对象
-                if (tokenResponse.error !== undefined) {
-                    let errorMessage = 'Google Auth Error: ' + tokenResponse.error;
-                    if (tokenResponse.details) errorMessage += '; Details: ' + tokenResponse.details;
-                    // ... (你的错误处理逻辑) ...
-                    console.error("driveSync.authenticate: Token response error:", errorMessage);
-                    reject(new Error(errorMessage));
+                console.log('[driveSync.authenticate] TokenClient Callback Fired. Response:', JSON.parse(JSON.stringify(tokenResponse))); // 打印完整的tokenResponse
+    if (tokenResponse.error !== undefined) {
+        let errorMessage = 'Google Auth Error: ' + tokenResponse.error;
+        if (tokenResponse.details) errorMessage += '; Details: ' + tokenResponse.details;
+        // ... (你的错误处理逻辑) ...
+        console.error("driveSync.authenticate: Token response error:", errorMessage);
+        reject(new Error(errorMessage)); // 确保 reject
+    } else {
+        if (tokenResponse && tokenResponse.access_token) {
+            console.log("driveSync.authenticate: Access token received:", tokenResponse.access_token.substring(0, 20) + "..."); // 打印部分令牌以确认
+            try {
+                driveSync.gapi.client.setToken(tokenResponse); // 直接传递 TokenResponse 对象
+                console.log("driveSync.authenticate: gapi.client.setToken(tokenResponse) called successfully.");
+                
+ // 验证一下 getToken 是否能取回我们刚设置的 (可选调试步骤)
+                const retrievedToken = driveSync.gapi.client.getToken();
+                if (retrievedToken && retrievedToken.access_token === tokenResponse.access_token) {
+                    console.log("driveSync.authenticate: Token successfully set and retrieved from gapi.client.");
                 } else {
-                    // **关键步骤：授权成功后，将访问令牌设置给 gapi.client**
-                    // tokenResponse 对象直接就是包含 access_token 的对象
-                    if (tokenResponse && tokenResponse.access_token) {
-                        console.log("driveSync.authenticate: Access token received. Setting token for GAPI client.");
-                        driveSync.gapi.client.setToken(tokenResponse); // 直接传递 TokenResponse 对象
-                        resolve({ success: true, tokenData: tokenResponse });
-                    } else {
-                        const errMsg = "driveSync.authenticate: Token response successful but access_token missing.";
-                        console.error(errMsg, tokenResponse);
-                        reject(new Error(errMsg));
-                    }
+                    console.warn("driveSync.authenticate: Token set but retrieval from gapi.client failed or mismatch.", retrievedToken);
                 }
-            };
+                
+                resolve({ success: true, tokenData: tokenResponse });
+            } catch (e) {
+                const errMsg = "driveSync.authenticate: Error calling gapi.client.setToken().";
+                console.error(errMsg, e, tokenResponse);
+                reject(new Error(errMsg + " Details: " + e.message));
+            }
+        } else {
+            const errMsg = "driveSync.authenticate: Token response successful but access_token missing in response.";
+            console.error(errMsg, tokenResponse);
+            reject(new Error(errMsg));
+        }
+    }
+};
 
             // 检查当前是否有有效的令牌
             const currentGapiToken = driveSync.gapi.client.getToken();
