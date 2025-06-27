@@ -69,7 +69,7 @@ const APP_SHELL_URLS = [
   '/images/icon-notifications-off.svg',
   '/images/icon-notifications-issue.svg', // 【NEW】新增通知状态图标
   '/images/icon-notifications-blocked.svg', // 【NEW】新增通知状态图标
-  // 添加其他核心 UI 图标... (保持您原有的列表)
+  '/images/icon-refresh.svg',
   '/images/icon-drive.svg',
   '/images/icon-stats.svg',
   '/images/icon-faq.svg',
