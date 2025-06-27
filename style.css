@@ -112,7 +112,6 @@
 body { font-family: 'Inter', sans-serif; min-height: 100vh; width: 100%; margin: 0; background: var(--body-bg-color); background-attachment: fixed; color: var(--text-color); transition: background-image 0.5s, color 0.3s; padding: var(--spacing-xl); box-sizing: border-box; }
 .container { width: 680px; max-width: 100%; margin: 0 auto; background: var(--container-bg); border: 1px solid var(--container-border-color); border-radius: var(--border-radius-lg); box-shadow: var(--shadow-lg); padding: var(--spacing-xl); display: flex; flex-direction: column; }
 .dashboard-mode .container { width: 1000px; }
-@media (min-width: 769px) { html:not(.dashboard-mode) body { width: 700px; min-width: 480px; padding: 0; display: block; } html:not(.dashboard-mode) .container { width: 100%; max-width: none; border-radius: 0; border: none; box-shadow: none; margin: 0; padding: var(--spacing-lg); } }
 .divider { flex-shrink: 0; height: 1px; background-color: var(--border-color); border: none; border-radius: 1px; margin-top: var(--spacing-xl); margin-bottom: var(--spacing-xl); width: 100%; }
 
 /* ==========================================================================
