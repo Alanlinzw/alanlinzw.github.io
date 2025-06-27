@@ -85,6 +85,7 @@ const db = (() => {
 // Google Drive Sync Module
 const driveSync = {
     CLIENT_ID: '325408458040-bp083eplhebaj5eoe2m9go2rdiir9l6c.apps.googleusercontent.com',
+    API_KEY: 'AIzaSyAHn27YYXEIwQuLRWi1lh2A48ffmr_wKcQ',
     SCOPES: 'https://www.googleapis.com/auth/drive.file',
     DISCOVERY_DOCS: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"],
     DRIVE_FILE_NAME: 'efficienTodoData.json',
@@ -109,6 +110,7 @@ initClients: async function() {
         driveSync.gapi.load('client', async () => {
             try {
                 await driveSync.gapi.client.init({
+                    apiKey: driveSync.API_KEY,
                     discoveryDocs: driveSync.DISCOVERY_DOCS,
                 });
                 console.log("driveSync.initClients: gapi.client.init 成功。");
