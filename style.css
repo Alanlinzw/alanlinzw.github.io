@@ -606,57 +606,58 @@ body { padding-bottom: 80px; }
 /* 当屏幕宽度大于 768px 时，应用以下桌面端样式 */
 @media (min-width: 769px) {
 
-    /* --- 1. 整体页面布局调整为 Flex 双列 --- */
+    /* --- 1. 整体页面布局调整为 Flexbox 双列 --- */
     body {
         /* 使用 Flexbox 创建主布局 */
         display: flex;
-        gap: var(--spacing-xl); /* 在导航和内容之间创建间隙 */
+        gap: var(--spacing-xl); /* 在导航和内容之间创建美观的间隙 */
         
-        /* 覆盖掉为移动端底部栏留出的内边距 */
-        padding-bottom: var(--spacing-xl); 
+        /* 确保 body 宽度是100% 并且有合适的内边距 */
+        width: 100%;
+        padding: var(--spacing-xl);
+        padding-bottom: var(--spacing-xl); /* 覆盖移动端为底部栏留出的内边距 */
     }
 
-    /* --- 2. 将底部导航栏改造为左侧边栏 --- */
+    /* --- 2. 将底部导航栏改造为左侧边栏 (Sidebar) --- */
     .bottom-tab-nav {
-        /* 从屏幕底部的固定栏变为页面左侧的普通块 */
-        position: sticky; /* 当页面滚动时，导航会“粘”在顶部 */
-        top: var(--spacing-xl); /* 与页面顶部内边距对齐 */
+        /* 使其在页面滚动时“粘”在顶部 */
+        position: sticky;
+        top: var(--spacing-xl);
         
         /* 设置边栏的尺寸 */
-        width: 240px; /* 为边栏设置一个固定的宽度 */
-        flex-shrink: 0; /* 防止边栏在空间不足时被压缩 */
-        height: fit-content; /* 高度由内容决定，但最大不超过视口 */
+        width: 240px;
+        flex-shrink: 0; /* 防止边栏被压缩 */
+        height: fit-content;
         max-height: calc(100vh - (var(--spacing-xl) * 2));
         overflow-y: auto; /* 如果导航项太多，允许内部滚动 */
 
-        /* 将导航项从水平排列改为垂直排列 */
+        /* 将导航项从水平改为垂直排列 */
         flex-direction: column;
-        justify-content: flex-start; /* 导航项从顶部开始排列 */
-        align-items: stretch; /* 让每个导航项都撑满边栏的宽度 */
+        justify-content: flex-start;
+        align-items: stretch; /* 让每个导航项都撑满边栏宽度 */
         gap: var(--spacing-sm);
 
         /* 美化边栏外观 */
         border-radius: var(--border-radius-lg);
         padding: var(--spacing-md);
         box-shadow: var(--shadow-md);
+        border-top: 1px solid var(--border-color); /* 保留顶部边框以保持一致性 */
     }
 
     /* --- 3. 调整边栏内导航项的样式 --- */
     .tab-item {
-        /* 将图标和文字从上下排列改为左右排列 */
-        flex-direction: row;
-        justify-content: flex-start; /* 内容靠左对齐 */
+        flex-direction: row; /* 图标和文字左右排列 */
+        justify-content: flex-start; /* 内容靠左 */
         padding: var(--spacing-md);
         border-radius: var(--border-radius-md);
         height: auto;
-        gap: var(--spacing-md); /* 图标和文字之间的间距 */
+        gap: var(--spacing-md);
     }
     
     .tab-label {
-        font-size: 16px; /* 在桌面端使用更大的字体 */
+        font-size: 16px; /* 桌面端使用更大的字体 */
     }
 
-    /* 高亮状态下的样式调整 */
     .tab-item.active {
         background-color: var(--primary-color);
         color: white;
@@ -664,20 +665,17 @@ body { padding-bottom: 80px; }
 
     /* 修复暗色模式下，高亮项的图标颜色 */
     [data-theme="dark"] .tab-item.active img {
-        filter: brightness(0) invert(1); /* 将深色图标变为白色 */
+        filter: brightness(0) invert(1);
     }
     
-    /* --- 4. 调整右侧主内容区的样式 --- */
+    /* --- 4. 【关键修正】让右侧主内容区填满剩余空间 --- */
     .container {
-        /* 让内容区占据所有剩余的水平空间 */
+        /* 让内容区自动伸展，填满所有可用空间 */
         flex-grow: 1; 
         
-        /* 覆盖掉原有的固定宽度和居中样式 */
+        /* 覆盖掉移动端的固定宽度和居中外边距 */
         width: auto;
         max-width: none;
         margin: 0;
-
-        /* 让内容区在垂直方向上充满，确保边框和背景正确显示 */
-        height: 100%; 
     }
 }
