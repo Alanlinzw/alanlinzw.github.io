@@ -75,18 +75,12 @@ const db = (() => {
     };
 })();
 
-
-// Google Drive Sync Module
-
-
-
-
             
 // Google Drive Sync Module
 const driveSync = {
     CLIENT_ID: '325408458040-bp083eplhebaj5eoe2m9go2rdiir9l6c.apps.googleusercontent.com',
     API_KEY: 'AIzaSyAHn27YYXEIwQuLRWi1lh2A48ffmr_wKcQ',
-    SCOPES: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.appdata',
+    SCOPES: 'https://www.googleapis.com/auth/drive.file',
     DISCOVERY_DOCS: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"],
     DRIVE_FILE_NAME: 'efficienTodoData.json',
     tokenClient: null,
@@ -178,33 +172,45 @@ initClients: async function() {
         });
     },
             
-    findOrCreateFile: async function() {
-        console.log("driveSync.findOrCreateFile: Method invoked.");
-        if (!driveSync.gapi || !driveSync.gapi.client || !driveSync.gapi.client.drive) {
-            throw new Error("driveSync.findOrCreateFile: Google Drive API client (driveSync.gapi.client.drive) not ready.");
-        }
-        // 使用 driveSync.gapi.client.drive.files.list ...
-        const response = await driveSync.gapi.client.drive.files.list({
-            q: `name='${driveSync.DRIVE_FILE_NAME}' and 'appDataFolder' in parents`,
-            spaces: 'appDataFolder',
-            fields: 'files(id, name)'
+// 【CORRECTED】
+// (在 app.js 的 driveSync 对象中)
+findOrCreateFile: async function() {
+    console.log("driveSync.findOrCreateFile: Searching in 'drive' space (user-visible area).");
+    if (!driveSync.gapi || !driveSync.gapi.client || !driveSync.gapi.client.drive) {
+        throw new Error("driveSync.findOrCreateFile: Google Drive API client not ready.");
+    }
+
+    // --- 核心修改：在正确的地方查找文件 ---
+    const response = await driveSync.gapi.client.drive.files.list({
+        // 查询条件：文件名匹配，并且文件没有被放入回收站
+        q: `name='${driveSync.DRIVE_FILE_NAME}' and trashed = false`, 
+        // 搜索空间：用户可见的 Google Drive
+        spaces: 'drive', 
+        // 需要返回的字段
+        fields: 'files(id, name)'
+    });
+
+    if (response.result.files && response.result.files.length > 0) {
+        // 找到了文件
+        driveSync.driveFileId = response.result.files[0].id;
+        console.log("driveSync.findOrCreateFile: Found existing file in 'drive' space:", driveSync.driveFileId);
+        return driveSync.driveFileId;
+    } else {
+        // 没找到，就创建一个新的
+        console.log("driveSync.findOrCreateFile: File not found in 'drive' space, creating a new one.");
+        
+        // --- 核心修改：在正确的地方创建文件 ---
+        const createResponse = await driveSync.gapi.client.drive.files.create({
+            // 资源信息：只指定文件名，默认会创建在根目录
+            resource: { name: driveSync.DRIVE_FILE_NAME }, 
+            // 需要返回的字段
+            fields: 'id'
         });
-        if (response.result.files && response.result.files.length > 0) {
-            driveSync.driveFileId = response.result.files[0].id;
-            console.log("driveSync.findOrCreateFile: Found file:", driveSync.driveFileId);
-            return driveSync.driveFileId;
-        } else {
-            console.log("driveSync.findOrCreateFile: File not found, creating new file.");
-            // 使用 driveSync.gapi.client.drive.files.create ...
-            const createResponse = await driveSync.gapi.client.drive.files.create({
-                resource: { name: driveSync.DRIVE_FILE_NAME, parents: ['appDataFolder'] },
-                fields: 'id'
-            });
-            driveSync.driveFileId = createResponse.result.id;
-            console.log("driveSync.findOrCreateFile: Created file:", driveSync.driveFileId);
-            return driveSync.driveFileId;
-        }
-    },
+        driveSync.driveFileId = createResponse.result.id;
+        console.log("driveSync.findOrCreateFile: Created new file in 'drive' space:", driveSync.driveFileId);
+        return driveSync.driveFileId;
+    }
+},
 
     upload: async function(data) {
         console.log("driveSync.upload: Method invoked.");
