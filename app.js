@@ -550,6 +550,57 @@ function renderAllLists() {
     renderLedgerSummary(ledgerData);
 }
 
+async function forceRefreshData() {
+    console.log("Manual refresh triggered. Forcing data reload from DB...");
+    
+    // 1. 可选：给用户一个视觉反馈
+    const refreshBtn = document.getElementById('manual-refresh-btn');
+    if (refreshBtn) {
+        const icon = refreshBtn.querySelector('img');
+        if (icon) {
+            icon.style.transition = 'transform 0.5s ease';
+            icon.style.transform = 'rotate(360deg)';
+        }
+        refreshBtn.disabled = true;
+    }
+
+    try {
+        // 2. 强制从 IndexedDB 重新加载最新的 `allTasks` 数据
+        // loadTasks 会更新全局的 allTasks 变量
+        await loadTasks();
+
+        // 3. 检查是否有到期的未来任务需要移动（这是一个好时机）
+        checkAndMoveFutureTasks();
+        
+        // 4. 重新渲染所有列表，UI将更新为最新数据
+        renderAllLists();
+        
+        console.log("Manual refresh completed successfully.");
+
+    } catch (error) {
+        console.error("Manual refresh failed:", error);
+        openCustomPrompt({
+            title: "刷新失败",
+            message: "从本地数据库加载数据时出错，请检查控制台获取更多信息。",
+            inputType: 'none',
+            confirmText: '好的',
+            hideCancelButton: true
+        });
+    } finally {
+        // 5. 恢复按钮状态
+        if (refreshBtn) {
+            const icon = refreshBtn.querySelector('img');
+            setTimeout(() => {
+                if (icon) {
+                    icon.style.transition = 'none'; // 移除过渡以便立即重置
+                    icon.style.transform = 'rotate(0deg)';
+                }
+                refreshBtn.disabled = false;
+            }, 500); // 等待动画完成
+        }
+    }
+}
+
 function downloadMonthlyTemplate() {
     const headers = ["text", "completed", "completionDate", "tags (comma-separated)", "subtasks (text|completed;...)", "links (comma-separated)", "progressText"];
     const exampleData = ["开发导入功能", false, "", "dev,feature", "设计UI|true;编写代码|false;测试|false", "https://github.com/SheetJS/sheetjs", "核心功能，需要尽快完成"];
@@ -2437,7 +2488,13 @@ function bindEventListeners() {
     if (faqBtn) faqBtn.addEventListener('click', showFaqModal);
     if (featuresBtn) featuresBtn.addEventListener('click', showFeaturesModal);
     if (donateBtn) donateBtn.addEventListener('click', () => openModal(donateModal));
-    
+
+const manualRefreshBtn = document.getElementById('manual-refresh-btn');
+if (manualRefreshBtn) {
+    manualRefreshBtn.addEventListener('click', forceRefreshData);
+}
+
+
     if (monthlyHistoryBtn) { 
         monthlyHistoryBtn.addEventListener('click', () => { 
             if (selectedMonthlyDisplayMonth !== 'current') { 
