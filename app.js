@@ -282,7 +282,7 @@ let annualReportYear = new Date().getFullYear();
 let currentPromptConfig = {};
 let activeKeydownHandler = null; 
 let currentSearchTerm = '';
-const faqs = const faqs = [
+const faqs = [
     {
         question: "如何使用任务提醒功能？",
         answer: "在“未来计划”模块中，为任务设置一个未来的具体日期和时间。当到达指定时间后，如果您的设备和浏览器支持，并且您已允许通知权限，应用会尝试发送一条系统通知来提醒您。"
