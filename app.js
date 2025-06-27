@@ -2698,18 +2698,54 @@ if (syncDriveBtn && syncStatusSpan) {
         console.log("Sync: Google API 客户端重新初始化成功。");
     }
 
-    // 2. 授权 (逻辑不变)
-    syncStatusSpan.textContent = '正在授权...';
-    await driveSync.authenticate();
-    
-    // 3. 查找或创建云端文件 (逻辑不变)
-    syncStatusSpan.textContent = '查找云文件...';
-    await driveSync.findOrCreateFile();
-    if (!driveSync.driveFileId) throw new Error('未能找到或创建云端文件。');
+   // ==========================================================
+            // 【核心修改】智能授权流程
+            // ==========================================================
+            const token = driveSync.gapi.client.getToken();
+            // 如果 gapi 客户端当前没有令牌（null），或者令牌已过期（这部分gapi内部会处理，
+            // 但明确检查 null 是个好习惯），则启动完整的授权流程。
+            if (token === null) {
+                console.log("Sync: No token found. Initiating full authentication.");
+                syncStatusSpan.textContent = '需要授权...';
+                await driveSync.authenticate();
+            } else {
+                console.log("Sync: Token already exists. Proceeding without re-authentication.");
+                // 如果已有令牌，我们可以信任 gapi 内部的令牌刷新机制，直接继续。
+            }
+            // ==========================================================
+            
+            // 3. 查找或创建云端文件
+            syncStatusSpan.textContent = '查找云文件...';
+            // 【重要】我们把对 findOrCreateFile 的调用放在 try-catch 块中，
+            // 以便捕获因令牌过期而导致的 401 错误。
+            try {
+                await driveSync.findOrCreateFile();
+            } catch (error) {
+                // 检查错误是否是授权问题 (通常是 401 Unauthorized)
+                if (error && (error.status === 401 || (error.result && error.result.error && error.result.error.code === 401))) {
+                    console.warn("Sync: API call failed with 401. Token might be expired or revoked. Re-authenticating...");
+                    syncStatusSpan.textContent = '令牌失效，重新授权...';
+                    
+                    // 强制清除可能无效的旧令牌
+                    driveSync.gapi.client.setToken(null);
+                    
+                    // 再次调用 authenticate
+                    await driveSync.authenticate();
+                    
+                    // 重试 findOrCreateFile
+                    console.log("Sync: Retrying findOrCreateFile after re-authentication.");
+                    await driveSync.findOrCreateFile();
+                } else {
+                    // 如果是其他错误 (如网络问题、文件权限问题等)，则直接抛出
+                    throw error;
+                }
+            }
 
-    // 4. 下载云端数据 (逻辑不变)
-    syncStatusSpan.textContent = '下载云数据...';
-    const cloudData = await driveSync.download();
+            if (!driveSync.driveFileId) throw new Error('未能找到或创建云端文件。');
+        
+            // 4. 下载云端数据
+            syncStatusSpan.textContent = '下载云数据...';
+            const cloudData = await driveSync.download();
     
     // 5. 获取本地数据 (逻辑不变)
     let localData = await db.get('allTasks');
