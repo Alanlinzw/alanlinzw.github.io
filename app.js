@@ -131,46 +131,48 @@ initClients: async function() {
     });
 },
 
-    authenticate: async function() {
-        console.log("driveSync.authenticate: Method invoked.");
-        return new Promise((resolve, reject) => {
-            if (!driveSync.gapi || !driveSync.gapi.client) {
-                 return reject(new Error("driveSync.authenticate: GAPI client not initialized."));
-            }
-            if (!driveSync.tokenClient) {
-                 console.error("driveSync.authenticate: driveSync.tokenClient is not initialized. This should have happened in initClients.");
-                 return reject(new Error("driveSync.authenticate: GIS Token Client not initialized."));
-            }
+  // 【CORRECTED & ROBUST AUTHENTICATION】
+// (在 app.js 的 driveSync 对象中)
+authenticate: function() { // 【注意】这里不再需要 async，因为它返回一个 Promise
+    console.log("driveSync.authenticate: Method invoked.");
+    return new Promise((resolve, reject) => {
+        if (!driveSync.tokenClient) {
+             const errMsg = "driveSync.authenticate: GIS Token Client not initialized.";
+             console.error(errMsg);
+             return reject(new Error(errMsg));
+        }
 
-            // GIS 会处理令牌的缓存和刷新。我们只需请求即可。
-            console.log("driveSync.authenticate: Requesting token via GIS token client.");
-            driveSync.tokenClient.callback = async (resp) => { // 设置回调
-                if (resp.error !== undefined) {
-                    console.error('driveSync.authenticate: Google Auth Error in callback:', resp);
-                    let errorMessage = 'Google Auth Error: ' + resp.error;
-                    if (resp.details) errorMessage += '; Details: ' + resp.details;
-                    if (resp.error === "popup_closed_by_user" || resp.error === "access_denied" || resp.error === "user_logged_out" || resp.error === "user_signed_out") {
-                        errorMessage = "用户取消了授权、拒绝了访问或已登出。";
-                    } else if (resp.error === "popup_failed_to_open") {
-                         errorMessage = "无法打开授权窗口，请检查浏览器是否阻止了弹出窗口。";
-                    }
-                    reject(new Error(errorMessage));
-                } else {
-                    console.log("driveSync.authenticate: GSI token client response successful. Token is implicitly available to gapi.client.");
-                    // GIS 库会自动使令牌对 gapi.client 可用
-                    resolve({ success: true });
-                }
-            };
+        // 设置回调函数，用于处理来自GIS库的响应
+        driveSync.tokenClient.callback = (resp) => {
+            // 移除回调，避免下次调用时意外触发
+            driveSync.tokenClient.callback = null; 
             
-            // 决定是否提示用户进行同意。
-            // 如果 gapi.client.getToken() 返回 null，意味着没有活动的令牌，或者之前的令牌已失效且被清除，此时应提示用户同意。
-            // 否则，使用空提示符('')尝试在不打扰用户的情况下获取令牌（例如，从缓存或活动会话中）。
-            const currentToken = driveSync.gapi.client.getToken();
-            const promptType = (!currentToken || currentToken.access_token === "") ? 'consent' : '';
-            console.log(`driveSync.authenticate: Requesting access token with prompt '${promptType}'. Current gapi token:`, currentToken);
-            driveSync.tokenClient.requestAccessToken({ prompt: promptType });
-        });
-    },
+            if (resp.error !== undefined) {
+                console.error('driveSync.authenticate: Google Auth Error in callback:', resp);
+                // 如果是用户关闭弹窗，或者静默请求失败需要弹窗但被阻止，
+                // 这些错误通常意味着需要用户交互，但流程已中断。
+                // 我们可以统一返回一个清晰的错误信息。
+                let errorMessage = `授权失败: ${resp.error}`;
+                if (resp.error === "popup_closed_by_user" || resp.error === "access_denied") {
+                    errorMessage = "用户取消了授权。";
+                } else if (resp.error === "popup_failed_to_open") {
+                     errorMessage = "无法打开授权窗口，请检查浏览器是否阻止了弹出窗口。";
+                }
+                reject(new Error(errorMessage));
+            } else {
+                console.log("driveSync.authenticate: GSI token acquired successfully.");
+                // 令牌已经由GIS库自动设置给GAPI，我们只需resolve表示成功即可
+                resolve({ success: true });
+            }
+        };
+        
+        // 【核心修正】不再自行判断 prompt 类型。
+        // 直接调用 requestAccessToken，让GIS库自己去决定是否需要弹出窗口。
+        // GIS的默认行为是：如果可能，就静默获取；如果必须，才弹出窗口。这正是我们想要的！
+        console.log("driveSync.authenticate: Requesting access token. Let GIS handle the prompt.");
+        driveSync.tokenClient.requestAccessToken(); 
+    });
+},
             
 // 【CORRECTED】
 // (在 app.js 的 driveSync 对象中)
