@@ -86,7 +86,7 @@ const db = (() => {
 const driveSync = {
     CLIENT_ID: '325408458040-bp083eplhebaj5eoe2m9go2rdiir9l6c.apps.googleusercontent.com',
     API_KEY: 'AIzaSyAHn27YYXEIwQuLRWi1lh2A48ffmr_wKcQ',
-    SCOPES: 'https://www.googleapis.com/auth/drive.file',
+    SCOPES: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.appdata',
     DISCOVERY_DOCS: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"],
     DRIVE_FILE_NAME: 'efficienTodoData.json',
     tokenClient: null,
