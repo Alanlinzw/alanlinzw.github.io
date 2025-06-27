@@ -2679,70 +2679,106 @@ if (syncDriveBtn && syncStatusSpan) {
         syncStatusSpan.textContent = '初始化同步...';
         syncDriveBtn.disabled = true;
 
-        try {
-            // 1. 检查 API 客户端是否准备就绪。最可靠的指标是 tokenClient 是否存在。
-            if (!driveSync.tokenClient) {
-                console.log("Sync: Google API 客户端未就绪，尝试重新初始化。");
-                // 调用正确的初始化函数，并等待它完成
-                await loadGoogleApis();
-                
-                // 再次检查，如果还是失败则抛出错误
-                if (!driveSync.tokenClient) {
-                    throw new Error('Google API 客户端未能成功初始化。');
-                }
-                console.log("Sync: Google API 客户端重新初始化成功。");
-            }
+       try {
+    // 1. 检查 API 客户端是否准备就绪 (逻辑不变)
+    if (!driveSync.tokenClient) {
+        console.log("Sync: Google API 客户端未就绪，尝试重新初始化。");
+        await loadGoogleApis();
+        if (!driveSync.tokenClient) {
+            throw new Error('Google API 客户端未能成功初始化。');
+        }
+        console.log("Sync: Google API 客户端重新初始化成功。");
+    }
 
-            // 2. 授权
-            syncStatusSpan.textContent = '正在授权...';
-            console.log("Sync: 请求 Google Drive 授权。");
-            const auth = await driveSync.authenticate();
-            if (!auth || !auth.success) throw new Error('Google Drive 授权失败。');
-            console.log("Sync: 授权成功。");
-            
-            // 3. 查找或创建云端文件
-            syncStatusSpan.textContent = '查找云文件...';
-            console.log("Sync: 查找或创建云端文件。");
-            await driveSync.findOrCreateFile();
-            if (!driveSync.driveFileId) throw new Error('未能找到或创建云端文件。');
-            console.log("Sync: 获得云文件 ID:", driveSync.driveFileId);
+    // 2. 授权 (逻辑不变)
+    syncStatusSpan.textContent = '正在授权...';
+    await driveSync.authenticate();
+    
+    // 3. 查找或创建云端文件 (逻辑不变)
+    syncStatusSpan.textContent = '查找云文件...';
+    await driveSync.findOrCreateFile();
+    if (!driveSync.driveFileId) throw new Error('未能找到或创建云端文件。');
 
-            // 4. 下载云端数据
-            syncStatusSpan.textContent = '下载云数据...';
-            console.log("Sync: 下载云端数据。");
-            const cloudData = await driveSync.download();
-            console.log("Sync: 云端数据下载完成。", cloudData ? '(有数据)' : '(无数据或新文件)');
-            
-            // 5. 获取本地数据
-            console.log("Sync: 获取本地 IndexedDB 数据。");
-            let localData = await db.get('allTasks');
-            if (!localData || typeof localData !== 'object') {
-                console.warn("Sync: 本地数据无效或缺失，使用默认结构。");
-                localData = { daily: [], monthly: [], future: [], ledger: [], history: {}, ledgerHistory: {}, budgets: {}, currencySymbol: '$', lastUpdatedLocal: 0 };
-            }
-            
-            // 确保内存中的 allTasks 与本地最新数据一致
-            allTasks = localData;
+    // 4. 下载云端数据 (逻辑不变)
+    syncStatusSpan.textContent = '下载云数据...';
+    const cloudData = await driveSync.download();
+    
+    // 5. 获取本地数据 (逻辑不变)
+    let localData = await db.get('allTasks');
+    if (!localData || typeof localData !== 'object') {
+        localData = { daily: [], monthly: [], future: [], ledger: [], history: {}, ledgerHistory: {}, budgets: {}, currencySymbol: '$', lastUpdatedLocal: 0 };
+    }
+    
+    // ====================================================================
+    // 【全新】首次同步与常规同步的判断与合并逻辑
+    // ====================================================================
 
-            // 6. 比较时间戳并执行合并/上传
-            if (cloudData && typeof cloudData === 'object' && cloudData.lastUpdatedLocal && 
-                cloudData.lastUpdatedLocal > (localData.lastUpdatedLocal || 0)) {
-                // 云端数据较新
-                syncStatusSpan.textContent = '云端数据较新，正在合并...';
-                console.log("Sync: 云端数据较新，将覆盖本地数据。");
-                allTasks = cloudData;
-                await saveTasks(); // 将合并后的数据存回本地
-                renderAllLists(); // 重新渲染界面
-                syncStatusSpan.textContent = '已从云端同步！';
-                console.log("Sync: 合并完成。");
-            } else {
-                // 本地数据较新或与云端一致，或云端无数据
-                syncStatusSpan.textContent = '上传本地数据...';
-                console.log("Sync: 本地数据较新或云端无数据，上传本地数据。");
-                const uploadResult = await driveSync.upload(allTasks);
-                syncStatusSpan.textContent = uploadResult.message;
-                console.log("Sync: 上传完成。", uploadResult.message);
-            }
+    const isFirstSyncCompleted = await db.get('isFirstSyncCompleted');
+
+    if (isFirstSyncCompleted !== true && cloudData && Object.keys(cloudData).length > 0) {
+        // --- 场景：首次同步，且云端有数据（来自插件版） ---
+        console.log("首次同步检测：执行数据合并策略。");
+        syncStatusSpan.textContent = '首次同步，正在合并数据...';
+
+        // **合并逻辑**
+        // 简单但有效的合并：将 PWA 的新数据追加到从云端下载的数据后面
+        // 注意：这种合并可能会产生重复项，但避免了数据丢失，用户可以手动清理。
+        const mergedTasks = {
+            daily: [...cloudData.daily, ...localData.daily],
+            monthly: [...cloudData.monthly, ...localData.monthly],
+            future: [...cloudData.future, ...localData.future],
+            ledger: [...cloudData.ledger, ...localData.ledger],
+            // 历史和预算等，暂时优先使用云端的
+            history: cloudData.history || {},
+            ledgerHistory: cloudData.ledgerHistory || {},
+            budgets: cloudData.budgets || {},
+            // 货币符号也优先使用云端的
+            currencySymbol: cloudData.currencySymbol || localData.currencySymbol,
+            // 使用最新的时间戳，以便上传
+            lastUpdatedLocal: Date.now() 
+        };
+        
+        // 使用合并后的数据更新 allTasks
+        allTasks = mergedTasks;
+        
+        // 将合并后的数据上传回 Google Drive
+        console.log("正在上传合并后的数据...");
+        await driveSync.upload(allTasks);
+
+        // 将合并后的数据保存到本地 IndexedDB
+        await db.set('allTasks', allTasks);
+        
+        // 【关键】标记首次同步已完成
+        await db.set('isFirstSyncCompleted', true);
+        
+        syncStatusSpan.textContent = '数据合并并同步成功！';
+        renderAllLists(); // 渲染合并后的列表
+
+    } else {
+        // --- 场景：常规同步（非首次），或首次同步但云端无数据 ---
+        console.log("常规同步检测：执行基于时间戳的覆盖策略。");
+
+        if (cloudData && typeof cloudData === 'object' && cloudData.lastUpdatedLocal && 
+            cloudData.lastUpdatedLocal > (localData.lastUpdatedLocal || 0)) {
+            // 云端较新，覆盖本地
+            syncStatusSpan.textContent = '云端数据较新，正在同步...';
+            allTasks = cloudData;
+            await db.set('allTasks', allTasks);
+            renderAllLists();
+            syncStatusSpan.textContent = '已从云端同步！';
+        } else {
+            // 本地较新或与云端一致，上传本地
+            syncStatusSpan.textContent = '上传本地数据...';
+            allTasks = localData; // 确保上传的是最新的本地数据
+            const uploadResult = await driveSync.upload(allTasks);
+            syncStatusSpan.textContent = uploadResult.message;
+        }
+
+        // 如果这是首次同步（但云端为空），现在也标记为完成
+        if (isFirstSyncCompleted !== true) {
+            await db.set('isFirstSyncCompleted', true);
+        }
+    }
 
         } catch (error) {
             console.error("同步操作失败:", error);
@@ -3372,11 +3408,25 @@ if (!statsModal) {
         if (syncStatusSpan) syncStatusSpan.textContent = 'Google 服务加载失败。';
     }
 
-    // 5. 加载数据并检查过期任务
-    try {
-        await loadTasks(); // 加载本地数据
-        console.log("initializeApp: 任务已从 DB 加载。");
-    } catch (e) {
+
+
+// 5. 加载数据并检查过期任务
+try {
+    await loadTasks(); // 加载本地数据
+    console.log("initializeApp: 任务已从 DB 加载。");
+
+    // 【新逻辑】检查首次同步状态
+    const firstSyncStatus = await db.get('isFirstSyncCompleted');
+    if (firstSyncStatus !== true && syncStatusSpan) {
+        syncStatusSpan.textContent = '请同步以合并数据';
+        setTimeout(() => {
+            if (syncStatusSpan.textContent === '请同步以合并数据') {
+                syncStatusSpan.textContent = '';
+            }
+        }, 8000);
+    }
+
+} catch (e) {
         console.error("initializeApp: 初始任务加载时发生严重错误:", e);
         openCustomPrompt({title:"加载数据失败", message:"无法加载您的数据，请尝试刷新页面或清除应用数据。", inputType:'none', confirmText:'好的', hideCancelButton:true});
         return; // 阻止后续执行
