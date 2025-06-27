@@ -414,22 +414,32 @@ function addTask(inputElement, taskArrayRefName, onCompleteCallback, options = {
     let newTask = {};
     const taskArray = allTasks[taskArrayRefName] || []; // 确保 taskArrayRefName 对应的数组存在
 
-    if (type === 'future') {
+ if (type === 'future') {
         const taskDateTimeValue = dateElement ? dateElement.value : '';
         newTask = { id: generateUniqueId(), text: taskText, completed: false, links: [] };
         if (taskDateTimeValue) {
             const reminderDate = new Date(taskDateTimeValue);
             const reminderTimestamp = reminderDate.getTime();
-            if (!isNaN(reminderTimestamp) && reminderTimestamp > Date.now()) { // 确保时间有效且在未来
+            if (!isNaN(reminderTimestamp) && reminderTimestamp > Date.now()) {
                 newTask.reminderTime = reminderTimestamp;
-                // 检查 Service Worker 控制器是否存在
-                if (notificationsEnabled && 'serviceWorker' in navigator && navigator.serviceWorker.controller) {
-                    navigator.serviceWorker.controller.postMessage({ type: 'SCHEDULE_REMINDER', payload: { task: newTask } });
-                    console.log(`[PWA App] SCHEDULE_REMINDER for task ID ${newTask.id} sent to Service Worker.`);
+                
+                // 【核心修正】增加健壮的提醒调度逻辑
+                if (notificationsEnabled && 'serviceWorker' in navigator) {
+                    // 使用 navigator.serviceWorker.ready 来确保 SW 已激活
+                    navigator.serviceWorker.ready.then(registration => {
+                        if (registration.active) {
+                            registration.active.postMessage({ type: 'SCHEDULE_REMINDER', payload: { task: newTask } });
+                            console.log(`[PWA App] SCHEDULE_REMINDER for task ID ${newTask.id} sent to active Service Worker.`);
+                        } else {
+                             console.warn(`[PWA App] Reminder for task ID ${newTask.id} NOT sent: Service Worker is ready but has no active worker.`);
+                        }
+                    }).catch(error => {
+                        console.error(`[PWA App] Error waiting for Service Worker to be ready for task ${newTask.id}:`, error);
+                    });
                 } else if (notificationsEnabled) {
-                    console.warn(`[PWA App] Reminder for task ID ${newTask.id} NOT sent: Service Worker controller not available or notificationsEnabled is false.`);
+                     console.warn(`[PWA App] Reminder for task ID ${newTask.id} NOT sent: Service Worker API not available or notificationsEnabled is false.`);
                 }
-            } else { // 如果时间无效或已过去，则只记录日期部分
+            } else { 
                 newTask.date = taskDateTimeValue.split('T')[0]; // 存储 YYYY-MM-DD 格式的日期
                 if(taskDateTimeValue && (isNaN(reminderTimestamp) || reminderTimestamp <= Date.now())) {
                     console.warn(`[PWA App] Future task "${taskText}" date/time (${taskDateTimeValue}) is invalid or in the past. Storing date only: ${newTask.date}`);
@@ -2189,30 +2199,33 @@ async function unsubscribeUserFromPush() {
     }
 }
 
+// 【CORRECTED & ROBUST - FINAL VERSION】
 async function subscribeUserToPush() {
-    // 1. 首先获取 Service Worker 注册对象
-    const registration = await navigator.serviceWorker.getRegistration();
-    if (!registration) {
-        console.error('订阅失败: Service Worker 未注册。');
-        openCustomPrompt({title:"订阅错误", message:'无法订阅通知，因为 Service Worker 没有被正确安装。请尝试刷新页面。', inputType:'none', hideCancelButton:true, confirmText:'好的'});
+    // 1. 检查 Service Worker API 是否可用
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+        console.warn("Push messaging is not supported by this browser.");
+        openCustomPrompt({title:"功能不支持", message:'您的浏览器不支持推送通知功能。', inputType:'none', hideCancelButton:true, confirmText:'好的'});
         return null;
     }
-
-    // 2. 等待 Service Worker 确保处于激活状态
-    await navigator.serviceWorker.ready;
-    console.log('Service Worker is active and ready.');
-
+    
     try {
+        // 2. 等待 Service Worker 确保处于激活状态
+        console.log('Waiting for Service Worker to be active...');
+        const registration = await navigator.serviceWorker.ready;
+        console.log('Service Worker is active and ready.');
+
         // 3. 检查是否已有订阅
         const existingSubscription = await registration.pushManager.getSubscription();
         if (existingSubscription) {
-            console.log('用户已经订阅:', existingSubscription);
-            await db.set('pushSubscription', existingSubscription); // 确保DB与实际情况同步
+            console.log('User is already subscribed:', existingSubscription);
+            // 【核心修正】在存储前，将 PushSubscription 转换为 JSON
+            const subscriptionJSON = existingSubscription.toJSON();
+            await db.set('pushSubscription', subscriptionJSON);
             return existingSubscription;
         }
 
         // 4. 如果没有，则创建新订阅
-        console.log('没有现有订阅，准备创建新订阅...');
+        console.log('No existing subscription, attempting to create a new one...');
         const vapidPublicKey = 'BOPBv2iLpTziiOOTjw8h2cT24-R_5c0s_q2ITf0JOTooBKiJBDl3bBROi4e_d_2dJd_quNBs2LrqEa2K_u_XGgY';
         if (!vapidPublicKey) {
             console.error("VAPID public key is missing.");
@@ -2225,32 +2238,39 @@ async function subscribeUserToPush() {
             applicationServerKey: urlBase64ToUint8Array(vapidPublicKey)
         });
         
-        console.log('新订阅成功:', subscription);
-        await db.set('pushSubscription', subscription); // 保存新订阅到DB
+        console.log('New subscription successful:', subscription);
+        
+        // 【核心修正】在存储前，将新的 PushSubscription 转换为 JSON
+        const subscriptionJSON = subscription.toJSON();
+        await db.set('pushSubscription', subscriptionJSON);
         
         // (可选) 在这里，您可以将 `subscription` 对象发送到您的后端服务器保存
+        // await sendSubscriptionToServer(subscription);
         
         return subscription;
 
     } catch (error) {
-        console.error('订阅推送失败:', error);
-        // 在 catch 块中，清除DB中的订阅信息，以反映失败状态
+        console.error('Failed to subscribe the user: ', error);
+        
+        // 确保在任何失败情况下，DB中的订阅信息都被清除
         await db.set('pushSubscription', null);
 
         let title = "订阅失败";
-        let message = `无法订阅推送通知，发生错误: ${error.name}.`;
+        let message = `无法订阅推送通知，发生未知错误: ${error.name}.`;
 
         if (error.name === 'NotAllowedError') {
             title = "权限问题";
-            message = '浏览器拒绝了通知权限。请在浏览器设置中为本站开启通知权限。';
+            message = '浏览器已阻止通知权限。请在浏览器设置中为本站开启通知权限，然后重试。';
         } else if (error.name === 'InvalidStateError') {
-             message = '可能是由于浏览器处于隐私模式，或 Service Worker 未完全激活。请稍后重试。';
+             message = '无法创建订阅，可能是由于浏览器处于隐私模式或 Service Worker 未完全激活。请刷新页面后重试。';
         }
         
         openCustomPrompt({title: title, message: message, inputType:'none', hideCancelButton:true, confirmText:'好的'});
         return null;
     }
 }
+
+
 function urlBase64ToUint8Array(base64String) {
     const padding = '='.repeat((4 - base64String.length % 4) % 4);
     const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
