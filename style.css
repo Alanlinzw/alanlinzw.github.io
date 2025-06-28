@@ -459,17 +459,83 @@ body { padding-bottom: 80px; }
 #annual-report-details .faq-answer::before { display: none; }
 
 /* ==========================================================================
-   18. CURRENCY PICKER STYLES
+   18. CURRENCY PICKER STYLES (FINAL FIX)
    ========================================================================== */
-.currency-picker { background-color: transparent; border: 1px solid transparent; border-radius: var(--border-radius-round); width: 32px; height: 32px; padding: 6px; cursor: pointer; margin-left: var(--spacing-sm); transition: all 0.2s ease; display: flex; align-items: center; justify-content: center; color: var(--light-text-color); opacity: 0.8; }
-.currency-picker:hover { background-color: var(--control-hover-bg-color); opacity: 1; transform: scale(1.1); }
-.currency-picker img { width: 100%; height: 100%; }
-[data-theme="dark"] .currency-picker { color: var(--light-text-color); }
-.currency-picker:hover { background-color: var(--control-hover-bg-color); border-color: var(--primary-color); transform: scale(1.1); }
-.currency-options-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--spacing-sm); }
-.currency-option-btn { padding: var(--spacing-md); font-size: 20px; font-weight: 700; }
-.currency-option-btn.active { background-color: var(--primary-color) !important; color: white !important; }
-.has-sticky-footer { position: relative; padding-bottom: 50px !important; }
+
+/* --- 货币选择器触发按钮 --- */
+.currency-picker { 
+    background-color: transparent; 
+    border: 1px solid transparent; 
+    border-radius: var(--border-radius-round); 
+    width: 32px; 
+    height: 32px; 
+    padding: 6px; 
+    cursor: pointer; 
+    margin-left: var(--spacing-sm); 
+    transition: all 0.2s ease; 
+    display: flex; 
+    align-items: center; 
+    justify-content: center; 
+    color: var(--light-text-color); 
+    opacity: 0.8; 
+}
+.currency-picker:hover { 
+    background-color: var(--control-hover-bg-color); 
+    opacity: 1; 
+    transform: scale(1.1); 
+    border-color: var(--primary-color);
+}
+.currency-picker img { 
+    width: 100%; 
+    height: 100%; 
+}
+[data-theme="dark"] .currency-picker { 
+    color: var(--light-text-color); 
+}
+
+/* --- 模态框内的网格容器 --- */
+.currency-options-grid {
+    display: grid;
+    /* 
+     * 【核心修复 1】使用更小的 minmax 值，并调整为5列。
+     * auto-fit 仍然是关键，但这里我们给它一个更明确的列数提示。
+     * 45px 是一个比较安全的最小宽度值。
+     */
+    grid-template-columns: repeat(auto-fit, minmax(45px, 1fr));
+    /* 【核心修复 2】减小按钮之间的间隙 */
+    gap: var(--spacing-xs); /* 使用更小的间隙变量，例如 5px */
+}
+
+/* --- 货币符号按钮本身 --- */
+.currency-option-btn {
+    /* 继承自 .custom-prompt-btn 的样式可能导致问题，我们在这里重置关键属性 */
+    min-width: unset !important; /* 【核心修复 3】取消任何可能继承的最小宽度限制！ */
+    
+    /* 调整内边距，使其更紧凑 */
+    padding: 8px 6px; 
+    
+    /* 保持字体大小和权重 */
+    font-size: 16px; 
+    font-weight: 600;
+
+    /* 确保按钮内容居中 */
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1; /* 确保文字垂直居中 */
+}
+
+/* --- 高亮状态的按钮 --- */
+.currency-option-btn.active { 
+    background-color: var(--primary-color) !important; 
+    color: white !important; 
+}
+
+/* --- 模态框粘性页脚的辅助类 --- */
+.has-sticky-footer { 
+    position: relative; 
+    padding-bottom: 50px !important; 
+}
 
 /* ==========================================================================
    19. RESPONSIVE DESIGN FOR MOBILE
@@ -777,4 +843,58 @@ body { padding-bottom: 80px; }
 
 [data-theme="dark"] .task-meta-indicators img {
     filter: var(--svg-icon-filter-dark);
+}
+
+/* ==========================================================================
+   23. MORE ACTIONS MENU ENHANCEMENT (NEW)
+   ========================================================================== */
+
+/* 统一菜单项的样式，无论是 button 还是 a 标签 */
+.more-actions-dropdown button,
+.more-actions-dropdown .more-actions-menu-item {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    padding: var(--spacing-sm) var(--spacing-md);
+    text-align: left;
+    width: 100%;
+    background-color: transparent;
+    border: none;
+    color: var(--text-color);
+    font-size: 15px;
+    font-weight: 500;
+    border-radius: var(--border-radius-sm);
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+    text-decoration: none; /* 移除 a 标签的下划线 */
+}
+
+.more-actions-dropdown button:hover,
+.more-actions-dropdown .more-actions-menu-item:hover {
+    background-color: var(--control-hover-bg-color);
+}
+
+.more-actions-dropdown button img,
+.more-actions-dropdown .more-actions-menu-item img {
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
+}
+
+[data-theme="dark"] .more-actions-dropdown button img,
+[data-theme="dark"] .more-actions-dropdown .more-actions-menu-item img {
+    filter: var(--svg-icon-filter-dark);
+}
+
+.more-actions-dropdown button span,
+.more-actions-dropdown .more-actions-menu-item span {
+    flex-grow: 1;
+}
+
+/* 为新加的 app-description 添加一些边距 */
+#features-modal .app-description {
+    margin-bottom: var(--spacing-lg);
+}
+#features-modal .app-description h3 {
+    margin-bottom: var(--spacing-sm);
 }
