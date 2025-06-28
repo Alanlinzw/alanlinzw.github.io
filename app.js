@@ -3555,3 +3555,4 @@ if ('serviceWorker' in navigator) {
         refreshing = true;
     });
 }
+}
