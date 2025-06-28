@@ -770,29 +770,37 @@ function handleLedgerImport(event) {
 function renderDailyTasks(tasksToRender) {
     if (!dailyTaskList) return;
     const now = new Date();
-    if(dailyTitleDate) dailyTitleDate.textContent = `(${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')})`;
+    if (dailyTitleDate) dailyTitleDate.textContent = `(${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')})`;
     dailyTaskList.innerHTML = '';
     const fragment = document.createDocumentFragment();
     tasksToRender.forEach((task) => {
-        const originalIndex = allTasks.daily.findIndex(t => t.id === task.id); 
-        if (originalIndex === -1 && !task.id) { 
-             console.warn("Daily task missing ID, cannot determine originalIndex:", task);
+        const originalIndex = allTasks.daily.findIndex(t => t.id === task.id);
+        if (originalIndex === -1 && !task.id) {
+            console.warn("Daily task missing ID, cannot determine originalIndex:", task);
         }
         const li = document.createElement('li');
         li.className = 'li-daily';
         if (task.completed) { li.classList.add('completed'); }
+
+        // 添加点击事件以展开/折叠
+        li.addEventListener('click', (e) => {
+            if (e.target.closest('a, button, input, .checkbox')) {
+                return;
+            }
+            const isExpanded = li.classList.toggle('is-expanded');
+            if (isExpanded) {
+                dailyTaskList.querySelectorAll('li.is-expanded').forEach(item => {
+                    if (item !== li) item.classList.remove('is-expanded');
+                });
+            }
+        });
+
+        // Drag handle 不在移动端渲染，但桌面端可能需要，所以用 createDragHandle
         li.appendChild(createDragHandle());
-        const taskMainWrapper = document.createElement('div');
-        taskMainWrapper.className = 'task-main-wrapper';
-        const taskContent = createTaskContent(task, originalIndex, 'daily', false);
-        taskMainWrapper.appendChild(taskContent);
-        if (task.links && task.links.length > 0) {
-            const linksContainer = createLinkPills(task, 'daily', originalIndex);
-            taskMainWrapper.appendChild(linksContainer);
-        }
-        const taskActions = createTaskActions(task, 'daily', originalIndex, false);
-        li.appendChild(taskMainWrapper);
-        li.appendChild(taskActions);
+
+        // createTaskContent 现在会创建所有需要的内部结构
+        li.appendChild(createTaskContent(task, originalIndex, 'daily', false));
+
         fragment.appendChild(li);
     });
     dailyTaskList.appendChild(fragment);
@@ -886,6 +894,8 @@ function renderMonthlyTasks(dataToRender, isHistoryView) {
         document.body.dataset.sortModeExitListenerAttached = 'true';
     }
 }
+
+
 function renderFutureTasks(tasksToRender) {
     if (!futureTaskList) return;
     futureTaskList.innerHTML = '';
@@ -1022,55 +1032,50 @@ function renderLedger(dataToRender, isHistoryView) {
 function createTaskContent(task, index, type, isHistoryView) {
     const taskContent = document.createElement('div');
     taskContent.className = 'task-content';
+    
+    // 创建一个容器来包裹始终可见的部分
+    const mainVisibleArea = document.createElement('div');
+    mainVisibleArea.className = 'task-main-visible-area';
+
     const titleGroup = document.createElement('div');
     titleGroup.className = 'task-title-group';
-
+    
     if (type === 'daily' || type === 'monthly') {
         const checkbox = document.createElement('span');
         checkbox.className = 'checkbox';
         if (!isHistoryView) {
             checkbox.addEventListener('click', (e) => {
-                e.stopPropagation();
+                e.stopPropagation(); // 阻止点击复选框时触发整个条目的展开/折叠
                 let taskToUpdate;
-                if (type === 'daily') {
-                    if (index > -1 && allTasks.daily[index]) { 
-                        taskToUpdate = allTasks.daily[index];
-                    } else { return; } 
-                } else { 
-                    if (index > -1 && allTasks.monthly[index]) {
-                        taskToUpdate = allTasks.monthly[index];
-                    } else { return; }
-                }
+                if (type === 'daily' && index > -1 && allTasks.daily[index]) { 
+                    taskToUpdate = allTasks.daily[index];
+                } else if (type === 'monthly' && index > -1 && allTasks.monthly[index]) {
+                    taskToUpdate = allTasks.monthly[index];
+                } else { return; }
                 
                 taskToUpdate.completed = !taskToUpdate.completed;
                 if(type === 'monthly'){
-                    taskToUpdate.progress = taskToUpdate.completed ? 100 : 0;
-                    taskToUpdate.completionDate = taskToUpdate.completed ? getTodayString() : null;
-                    if (taskToUpdate.subtasks && taskToUpdate.subtasks.length > 0) {
-                        taskToUpdate.subtasks.forEach(st => st.completed = taskToUpdate.completed);
-                    }
-                     updateMonthlyTaskProgress(taskToUpdate); 
+                    updateMonthlyTaskProgress(taskToUpdate);
                 }
                 saveTasks();
                 renderAllLists();
             });
         } else {
-            checkbox.style.cursor = 'default'; 
+            checkbox.style.cursor = 'default';
         }
         titleGroup.appendChild(checkbox);
     }
-
-    if (type === 'monthly' && !isHistoryView && task) { 
+    
+    if (type === 'monthly' && task && !isHistoryView && task.priority !== undefined) {
         const priorityIndicator = document.createElement('span');
         priorityIndicator.className = 'priority-indicator';
-        const prioritySymbols = { 1: '!', 2: '!!', 3: '!!!' }; 
+        const prioritySymbols = { 1: '!', 2: '!!', 3: '!!!' };
         const priorityColors = { 1: 'var(--priority-low)', 2: 'var(--priority-medium)', 3: 'var(--priority-high)'};
-        const currentPriority = task.priority || 2; 
+        const currentPriority = task.priority || 2;
 
         priorityIndicator.textContent = prioritySymbols[currentPriority];
-        priorityIndicator.style.color = priorityColors[currentPriority];
-        priorityIndicator.style.fontWeight = 'bold';
-        priorityIndicator.style.marginRight = '8px';
+        priorityIndicator.className += ` priority-${currentPriority === 3 ? 'high' : currentPriority === 2 ? 'medium' : 'low'}`;
+        
         priorityIndicator.style.cursor = 'pointer';
         priorityIndicator.title = `点击修改优先级 (当前: ${currentPriority === 3 ? '高' : currentPriority === 2 ? '中' : '低'})`;
         
@@ -1093,28 +1098,67 @@ function createTaskContent(task, index, type, isHistoryView) {
 
     const taskText = document.createElement('span');
     taskText.className = 'task-text';
-    taskText.textContent = task ? task.text : ''; 
+    taskText.textContent = task ? task.text : '';
     titleGroup.appendChild(taskText);
+    mainVisibleArea.appendChild(titleGroup);
 
-    if (type === 'monthly' && task && task.completed && task.completionDate) {
-        const completionMarker = document.createElement('div');
-        completionMarker.className = 'completion-date-marker';
-        completionMarker.innerHTML = `✓ ${task.completionDate}`;
-        completionMarker.title = `完成于 ${task.completionDate}`;
-        titleGroup.appendChild(completionMarker);
+    const metaIndicators = document.createElement('div');
+    metaIndicators.className = 'task-meta-indicators';
+
+    if (type === 'monthly' && task && task.subtasks && task.subtasks.length > 0) {
+        const completedCount = task.subtasks.filter(st => st.completed).length;
+        const subtaskIndicator = document.createElement('span');
+        // 请确保您有 /images/icon-subtask.svg 图标文件，或者替换为文字
+        subtaskIndicator.innerHTML = `<img src="images/icon-subtask.svg" alt="Subtasks" style="vertical-align: middle;"> ${completedCount}/${task.subtasks.length}`;
+        subtaskIndicator.title = `子任务进度: ${completedCount}/${task.subtasks.length}`;
+        metaIndicators.appendChild(subtaskIndicator);
+    }
+
+    const noteTextValue = (type === 'daily' && task) ? task.note : (task ? task.progressText : null);
+    if (noteTextValue && noteTextValue.trim() !== '') {
+        const noteIndicator = document.createElement('span');
+        // 请确保您有 /images/icon-note.svg 图标文件
+        noteIndicator.innerHTML = `<img src="images/icon-note.svg" alt="Note">`;
+        noteIndicator.title = '有备注';
+        metaIndicators.appendChild(noteIndicator);
     }
     
-    taskContent.appendChild(titleGroup);
+    if (task && task.links && task.links.length > 0) {
+        const linkIndicator = document.createElement('span');
+        linkIndicator.innerHTML = `<img src="images/icon-link.svg" alt="Links"> ${task.links.length}`;
+        linkIndicator.title = `有 ${task.links.length} 个链接`;
+        metaIndicators.appendChild(linkIndicator);
+    }
+    
+    mainVisibleArea.appendChild(metaIndicators);
+    taskContent.appendChild(mainVisibleArea);
 
-    if (task) { 
-        const noteTextValue = (type === 'daily') ? task.note : task.progressText;
-        if (noteTextValue && noteTextValue.trim() !== '') {
-            const noteDisplayDiv = document.createElement('div');
-            noteDisplayDiv.className = 'note-display-text';
-            noteDisplayDiv.textContent = noteTextValue;
-            taskContent.appendChild(noteDisplayDiv);
+    const detailsPane = document.createElement('div');
+    detailsPane.className = 'task-details-pane';
+
+    if (noteTextValue && noteTextValue.trim() !== '') {
+        const noteDisplayDiv = document.createElement('div');
+        noteDisplayDiv.className = 'note-display-text';
+        noteDisplayDiv.textContent = noteTextValue;
+        detailsPane.appendChild(noteDisplayDiv);
+    }
+
+    if (task && task.links && task.links.length > 0) {
+        detailsPane.appendChild(createLinkPills(task, type, index));
+    }
+
+    if (type === 'monthly') {
+        if (task && task.subtasks && task.subtasks.length > 0) {
+            detailsPane.appendChild(createSubtaskList(task, index, isHistoryView));
+        }
+        if (!isHistoryView && index > -1) {
+            detailsPane.appendChild(createSubtaskInput(index));
         }
     }
+
+    detailsPane.appendChild(createTaskActions(task, type, index, isHistoryView));
+    taskContent.appendChild(detailsPane);
+
     return taskContent;
 }
 function sortMonthlyTasksByPriority() {
@@ -1507,13 +1551,11 @@ function archiveSingleItem(type, index) {
     });
 }
 
-
 function createTaskActions(task, type, index, isHistoryView) {
     const actionsContainer = document.createElement('div');
     actionsContainer.className = 'task-actions';
-    if (!task) return actionsContainer; // 如果任务数据不存在，返回空容器
+    if (!task) return actionsContainer;
 
-    // --- 历史视图的特殊处理 ---
     if (isHistoryView) {
         const deleteBtn = document.createElement('button');
         deleteBtn.className = 'action-btn delete-btn';
@@ -1538,27 +1580,19 @@ function createTaskActions(task, type, index, isHistoryView) {
                 cancelText: '取消',
                 onConfirm: () => {
                     let realIndex = -1;
-                    // 对于月度任务，最好通过 ID 查找，因为历史数组可能没有严格的索引对应
                     if (type === 'monthly' && task.id) { 
                         realIndex = historyArray.findIndex(item => item.id === task.id);
-                    } else if (type === 'ledger') { 
-                        // 对于账本，如果传递的 index 是基于当前渲染的过滤/排序列表，可能不准确
-                        // 更可靠的方式是基于内容查找，但这可能导致重复项问题
-                        // 假设这里的 index 是相对于 historyArray 的准确索引，或者需要更复杂的查找
-                        // 为了简化，我们暂时信任传入的 index，但月度任务用 ID 更安全
-                        realIndex = index; 
                     } else { 
-                        // 回退到 indexOf，但可能不准确
-                        realIndex = historyArray.indexOf(task); 
+                        realIndex = index; 
                     }
 
                     if (realIndex > -1 && realIndex < historyArray.length) {
                         historyArray.splice(realIndex, 1);
-                        if (historyArray.length === 0) { // 如果月份空了，删除该月份的键
+                        if (historyArray.length === 0) {
                             delete allTasks[historyArrayName][selectedMonth]; 
                         }
                         saveTasks();
-                        renderAllLists(); // 重新渲染以反映删除
+                        renderAllLists();
                     } else { 
                         console.error("删除失败：未在历史记录中找到该条目或索引无效。", task, realIndex, historyArray); 
                     }
@@ -1566,12 +1600,9 @@ function createTaskActions(task, type, index, isHistoryView) {
             });
         });
         actionsContainer.appendChild(deleteBtn);
-        return actionsContainer; // 历史视图只有删除按钮
+        return actionsContainer;
     }
 
-    // --- 非历史视图的按钮 ---
-
-    // 备注按钮 (适用于每日和月度任务)
     if (type === 'daily' || type === 'monthly') {
         const noteBtn = document.createElement('button');
         noteBtn.className = 'action-btn note-btn';
@@ -1606,7 +1637,6 @@ function createTaskActions(task, type, index, isHistoryView) {
         actionsContainer.appendChild(noteBtn);
     }
 
-    // 编辑按钮 (适用于每日、月度、未来任务)
     if (type === 'daily' || type === 'monthly' || type === 'future') {
         const editBtn = document.createElement('button');
         editBtn.className = 'action-btn edit-task-btn';
