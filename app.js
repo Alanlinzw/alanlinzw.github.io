@@ -866,7 +866,7 @@ function renderMonthlyTasks(dataToRender, isHistoryView) {
         });
         document.body.dataset.sortModeExitListenerAttached = 'true';
     }
-}
+
 
 
 function renderFutureTasks(tasksToRender) {
