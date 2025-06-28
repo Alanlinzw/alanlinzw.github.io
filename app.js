@@ -1022,24 +1022,25 @@ function renderLedger(dataToRender, isHistoryView) {
     });
     ledgerList.appendChild(fragment);
 }
-// 在 app.js 中找到并替换此函数
 function createTaskContent(task, index, type, isHistoryView) {
     const taskContent = document.createElement('div');
     taskContent.className = 'task-content';
     
-    // 创建一个容器来包裹始终可见的部分
+    // 1. 创建始终可见的顶层区域
     const mainVisibleArea = document.createElement('div');
     mainVisibleArea.className = 'task-main-visible-area';
 
+    // 2. 创建标题组 (包含复选框、优先级、标签、任务文本、完成日期)
     const titleGroup = document.createElement('div');
     titleGroup.className = 'task-title-group';
     
+    // -- 复选框 --
     if (type === 'daily' || type === 'monthly') {
         const checkbox = document.createElement('span');
         checkbox.className = 'checkbox';
         if (!isHistoryView) {
             checkbox.addEventListener('click', (e) => {
-                e.stopPropagation(); // 阻止点击复选框时触发整个条目的展开/折叠
+                e.stopPropagation();
                 let taskToUpdate;
                 if (type === 'daily' && index > -1 && allTasks.daily[index]) { 
                     taskToUpdate = allTasks.daily[index];
@@ -1060,16 +1061,15 @@ function createTaskContent(task, index, type, isHistoryView) {
         titleGroup.appendChild(checkbox);
     }
     
+    // -- 优先级指示器 (仅月度) --
     if (type === 'monthly' && task && !isHistoryView && task.priority !== undefined) {
         const priorityIndicator = document.createElement('span');
         priorityIndicator.className = 'priority-indicator';
         const prioritySymbols = { 1: '!', 2: '!!', 3: '!!!' };
-        const priorityColors = { 1: 'var(--priority-low)', 2: 'var(--priority-medium)', 3: 'var(--priority-high)'};
         const currentPriority = task.priority || 2;
 
         priorityIndicator.textContent = prioritySymbols[currentPriority];
-        priorityIndicator.className += ` priority-${currentPriority === 3 ? 'high' : currentPriority === 2 ? 'medium' : 'low'}`;
-        
+        priorityIndicator.classList.add(`priority-${currentPriority === 3 ? 'high' : currentPriority === 2 ? 'medium' : 'low'}`);
         priorityIndicator.style.cursor = 'pointer';
         priorityIndicator.title = `点击修改优先级 (当前: ${currentPriority === 3 ? '高' : currentPriority === 2 ? '中' : '低'})`;
         
@@ -1086,18 +1086,18 @@ function createTaskContent(task, index, type, isHistoryView) {
         titleGroup.appendChild(priorityIndicator);
     }
     
+    // -- 标签 (仅月度) --
     if (type === 'monthly' && task && task.tags && task.tags.length > 0) { 
         titleGroup.appendChild(createTaskTags(task.tags));
     }
 
+    // -- 任务文本 --
     const taskText = document.createElement('span');
     taskText.className = 'task-text';
     taskText.textContent = task ? task.text : '';
     titleGroup.appendChild(taskText);
-
-    // ==========================================================
-    // 【已添加】恢复显示“完成日期”的逻辑
-    // ==========================================================
+    
+    // -- 完成日期标记 (仅月度) --
     if (type === 'monthly' && task && task.completed && task.completionDate) {
         const completionMarker = document.createElement('div');
         completionMarker.className = 'completion-date-marker';
@@ -1105,31 +1105,32 @@ function createTaskContent(task, index, type, isHistoryView) {
         completionMarker.title = `完成于 ${task.completionDate}`;
         titleGroup.appendChild(completionMarker);
     }
-    // ==========================================================
-
+    
     mainVisibleArea.appendChild(titleGroup);
 
+    // 3. 创建元信息提示图标区域 (在标题组旁边)
     const metaIndicators = document.createElement('div');
     metaIndicators.className = 'task-meta-indicators';
 
+    // -- 子任务提示图标 --
     if (type === 'monthly' && task && task.subtasks && task.subtasks.length > 0) {
         const completedCount = task.subtasks.filter(st => st.completed).length;
         const subtaskIndicator = document.createElement('span');
-        // 请确保您有 /images/icon-subtask.svg 图标文件，或者替换为文字
-        subtaskIndicator.innerHTML = `<img src="images/icon-subtask.svg" alt="Subtasks" style="vertical-align: middle;"> ${completedCount}/${task.subtasks.length}`;
+        subtaskIndicator.innerHTML = `<img src="images/icon-subtask.svg" alt="Subtasks"> ${completedCount}/${task.subtasks.length}`;
         subtaskIndicator.title = `子任务进度: ${completedCount}/${task.subtasks.length}`;
         metaIndicators.appendChild(subtaskIndicator);
     }
 
+    // -- 备注提示图标 --
     const noteTextValue = (type === 'daily' && task) ? task.note : (task ? task.progressText : null);
     if (noteTextValue && noteTextValue.trim() !== '') {
         const noteIndicator = document.createElement('span');
-        // 请确保您有 /images/icon-note.svg 图标文件
         noteIndicator.innerHTML = `<img src="images/icon-note.svg" alt="Note">`;
         noteIndicator.title = '有备注';
         metaIndicators.appendChild(noteIndicator);
     }
     
+    // -- 链接提示图标 --
     if (task && task.links && task.links.length > 0) {
         const linkIndicator = document.createElement('span');
         linkIndicator.innerHTML = `<img src="images/icon-link.svg" alt="Links"> ${task.links.length}`;
@@ -1140,9 +1141,11 @@ function createTaskContent(task, index, type, isHistoryView) {
     mainVisibleArea.appendChild(metaIndicators);
     taskContent.appendChild(mainVisibleArea);
 
+    // 4. 创建可折叠的详情面板
     const detailsPane = document.createElement('div');
     detailsPane.className = 'task-details-pane';
 
+    // -- 完整的备注内容 --
     if (noteTextValue && noteTextValue.trim() !== '') {
         const noteDisplayDiv = document.createElement('div');
         noteDisplayDiv.className = 'note-display-text';
@@ -1150,10 +1153,12 @@ function createTaskContent(task, index, type, isHistoryView) {
         detailsPane.appendChild(noteDisplayDiv);
     }
 
+    // -- 完整的链接列表 --
     if (task && task.links && task.links.length > 0) {
         detailsPane.appendChild(createLinkPills(task, type, index));
     }
 
+    // -- 完整的子任务列表和输入框 (仅月度) --
     if (type === 'monthly') {
         if (task && task.subtasks && task.subtasks.length > 0) {
             detailsPane.appendChild(createSubtaskList(task, index, isHistoryView));
@@ -1163,12 +1168,13 @@ function createTaskContent(task, index, type, isHistoryView) {
         }
     }
 
+    // -- 完整的操作按钮工具栏 --
     detailsPane.appendChild(createTaskActions(task, type, index, isHistoryView));
+    
     taskContent.appendChild(detailsPane);
 
     return taskContent;
 }
-
 function sortMonthlyTasksByPriority() {
     if (selectedMonthlyDisplayMonth === 'current' && allTasks.monthly && allTasks.monthly.length > 0) {
         allTasks.monthly.sort((a, b) => {
