@@ -679,3 +679,181 @@ body { padding-bottom: 80px; }
         margin: 0;
     }
 }
+
+
+/* ==========================================================================
+   21. MOBILE TASK ITEM UI ENHANCEMENT (NEW)
+   ========================================================================== */
+
+@media (max-width: 768px) {
+
+    /* --- A. 通用任务条目基础样式 --- */
+    .task-list li {
+        flex-direction: column; /* 让所有内容垂直排列 */
+        align-items: stretch; /* 撑满宽度 */
+        padding: var(--spacing-md);
+        transition: background-color 0.3s ease, box-shadow 0.3s ease;
+    }
+
+    /* 默认隐藏所有操作按钮和详情内容 */
+    .task-list li .task-actions,
+    .task-list li .subtask-list,
+    .task-list li .subtask-input-area,
+    .task-list li .links-container,
+    .task-list li .note-display-text {
+        display: none;
+    }
+    
+    /* --- B. 任务条目主要内容区（始终可见） --- */
+    .task-main-wrapper {
+        width: 100%;
+        padding-right: 0; /* 移除为旧按钮留出的空间 */
+    }
+
+    .task-main-visible-area {
+        display: flex;
+        align-items: center;
+        width: 100%;
+        cursor: pointer; /* 提示用户这是可点击的 */
+    }
+
+    .task-title-group {
+        width: 100%;
+        gap: var(--spacing-sm);
+        flex-grow: 1; /* 占据尽可能多的空间 */
+        min-width: 0; /* 允许 flex item 收缩 */
+    }
+    
+    .task-text {
+        flex-grow: 1;
+        min-width: 0;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-size: 16px; /* 在移动端适当增大字体 */
+        line-height: 1.5;
+    }
+
+    /* --- C. 次要信息提示图标（新） --- */
+    .task-meta-indicators {
+        display: flex;
+        align-items: center;
+        gap: var(--spacing-md);
+        margin-left: auto; /* 推到最右边 */
+        flex-shrink: 0;
+        color: var(--light-text-color);
+        font-size: 13px;
+    }
+
+    .task-meta-indicators span {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+    }
+
+    .task-meta-indicators img {
+        width: 16px;
+        height: 16px;
+        opacity: 0.6;
+    }
+    [data-theme="dark"] .task-meta-indicators img {
+        filter: var(--svg-icon-filter-dark);
+    }
+
+    /* --- D. 展开后的详情和操作区域 --- */
+    .task-details-pane {
+        display: none; /* 默认隐藏 */
+        flex-direction: column;
+        gap: var(--spacing-md);
+        padding-top: var(--spacing-md);
+        margin-top: var(--spacing-md);
+        border-top: 1px solid var(--card-border-color);
+        animation: fadeIn 0.4s ease forwards;
+    }
+
+    @keyframes fadeIn {
+        from { opacity: 0; transform: translateY(-10px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* 展开状态下的样式 */
+    .task-list li.is-expanded {
+        background-color: color-mix(in srgb, var(--primary-color) 5%, var(--card-bg));
+        box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary-color) 40%, transparent), var(--shadow-md);
+    }
+
+    .task-list li.is-expanded .task-details-pane {
+        display: flex; /* 展开时显示 */
+    }
+    
+    .task-list li.is-expanded .task-text {
+        white-space: normal; /* 展开后允许任务文本换行 */
+    }
+
+    /* 展开后，重新显示被隐藏的详情内容 */
+    .task-list li.is-expanded .note-display-text,
+    .task-list li.is-expanded .links-container,
+    .task-list li.is-expanded .subtask-list,
+    .task-list li.is-expanded .subtask-input-area {
+        display: flex; /* 或 block/grid 根据元素类型 */
+        margin-left: 0 !important; /* 清除旧的缩进 */
+        padding-left: 0 !important;
+    }
+    
+    .task-list li.is-expanded .note-display-text {
+        display: block; /* note 是块级元素 */
+        padding: var(--spacing-sm) var(--spacing-md);
+        padding-left: calc(var(--spacing-md) + 10px) !important;
+        margin-top: 0;
+        position: relative;
+    }
+    .note-display-text::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 4px;
+        height: 100%;
+        background-color: var(--accent-amber);
+        opacity: 0.8;
+    }
+    
+    /* --- E. 统一的操作工具栏 --- */
+    .task-actions {
+        display: flex; 
+        justify-content: space-around;
+        align-items: center;
+        width: 100%;
+        background-color: var(--control-bg);
+        border: 1px solid var(--card-border-color);
+        border-radius: var(--border-radius-pill);
+        padding: var(--spacing-xs);
+        margin-top: var(--spacing-sm);
+        box-shadow: var(--shadow-sm);
+    }
+
+    /* 在展开的详情面板中显示操作栏 */
+    .task-details-pane .task-actions {
+        display: flex;
+    }
+
+    .task-actions .action-btn {
+        opacity: 0.7; /* 让按钮默认可见 */
+        flex: 1; /* 让按钮平分空间 */
+        height: 36px;
+    }
+    .task-actions .action-btn:hover {
+        opacity: 1;
+    }
+    
+    /* 移除旧的、位于任务条目主区域右侧的按钮的显示 */
+    .task-list li > .task-actions {
+       display: none !important;
+    }
+    
+    /* --- F. 确保每日清单和月度清单在没有拖拽手柄时左侧对齐 --- */
+    .li-daily .task-main-wrapper,
+    .li-monthly .task-main-wrapper {
+        margin-left: 0;
+    }
+}
