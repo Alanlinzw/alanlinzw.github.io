@@ -805,9 +805,10 @@ function renderDailyTasks(tasksToRender) {
     });
     dailyTaskList.appendChild(fragment);
 }
+
 function renderMonthlyTasks(dataToRender, isHistoryView) {
     if (!monthlyTaskList) return;
-    
+
     // --- 1. 更新头部UI ---
     if (isHistoryView) {
         monthlyHeaderTitle.innerHTML = `本月待办 <span class="header-date">(${selectedMonthlyDisplayMonth})</span>`;
@@ -820,7 +821,7 @@ function renderMonthlyTasks(dataToRender, isHistoryView) {
         if (monthlyHistoryBtn) monthlyHistoryBtn.title = '查看历史记录';
     }
     if (monthlyInputArea) monthlyInputArea.style.display = isHistoryView ? 'none' : 'grid';
-    
+
     // --- 2. 清空并准备渲染 ---
     monthlyTaskList.innerHTML = '';
     const fragment = document.createDocumentFragment();
@@ -835,17 +836,18 @@ function renderMonthlyTasks(dataToRender, isHistoryView) {
         if (task.completed) li.classList.add('completed');
         if (isHistoryView) li.classList.add('is-history-item');
         
-        const originalIndex = isHistoryView ?
-            (allTasks.history[selectedMonthlyDisplayMonth] || []).findIndex(t => t.id === task.id) :
-            allTasks.monthly.findIndex(t => t.id === task.id);
+        const originalIndex = isHistoryView 
+            ? (allTasks.history[selectedMonthlyDisplayMonth] || []).findIndex(t => t.id === task.id) 
+            : allTasks.monthly.findIndex(t => t.id === task.id);
 
         if (!isHistoryView && originalIndex > -1 && allTasks.monthly[originalIndex]) { 
             updateMonthlyTaskProgress(allTasks.monthly[originalIndex]);
         }
         
-        // 添加点击事件以展开/折叠
+        // --- 添加点击事件以展开/折叠 ---
         li.addEventListener('click', (e) => {
-            if (e.target.closest('a, button, input, .checkbox')) {
+            // 【关键修改】忽略对拖拽手柄的点击
+            if (e.target.closest('a, button, input, .checkbox, .drag-handle')) {
                 return;
             }
             const isExpanded = li.classList.toggle('is-expanded');
@@ -861,19 +863,22 @@ function renderMonthlyTasks(dataToRender, isHistoryView) {
         progressBar.style.width = `${task.progress || 0}%`;
         li.appendChild(progressBar);
         
-        if (!isHistoryView) li.appendChild(createDragHandle());
+        // --- 保留拖拽手柄的创建 ---
+        if (!isHistoryView) {
+            li.appendChild(createDragHandle());
+        }
         
-        // 使用 createTaskContent 创建所有内部结构
+        // --- 正确地附加由 createTaskContent 创建的完整内容 ---
+        // createTaskContent 内部已经包含了隐藏的详情面板和操作按钮
         li.appendChild(createTaskContent(task, originalIndex, 'monthly', isHistoryView));
         
-        // 【已修复】将 li 添加到 fragment
         fragment.appendChild(li);
-    }); // <-- forEach 循环正确闭合
+    });
 
     // --- 4. 将所有创建的元素一次性添加到DOM ---
     monthlyTaskList.appendChild(fragment);
 
-    // --- 5. 确保“点击外部关闭排序模式”的事件监听器只被添加一次 ---
+    // --- 5. 全局事件监听器（无需修改） ---
     if (!document.body.dataset.sortModeExitListenerAttached) {
         document.body.addEventListener('click', (e) => {
             if (monthlyTaskList && !e.target.closest('.task-list.sort-mode-active')) {
@@ -882,8 +887,7 @@ function renderMonthlyTasks(dataToRender, isHistoryView) {
         });
         document.body.dataset.sortModeExitListenerAttached = 'true';
     }
-} // <-- 【已修复】函数在这里正确闭合
-
+}
 
 function renderFutureTasks(tasksToRender) {
     if (!futureTaskList) return;
@@ -1018,6 +1022,7 @@ function renderLedger(dataToRender, isHistoryView) {
     });
     ledgerList.appendChild(fragment);
 }
+// 在 app.js 中找到并替换此函数
 function createTaskContent(task, index, type, isHistoryView) {
     const taskContent = document.createElement('div');
     taskContent.className = 'task-content';
@@ -1089,6 +1094,19 @@ function createTaskContent(task, index, type, isHistoryView) {
     taskText.className = 'task-text';
     taskText.textContent = task ? task.text : '';
     titleGroup.appendChild(taskText);
+
+    // ==========================================================
+    // 【已添加】恢复显示“完成日期”的逻辑
+    // ==========================================================
+    if (type === 'monthly' && task && task.completed && task.completionDate) {
+        const completionMarker = document.createElement('div');
+        completionMarker.className = 'completion-date-marker';
+        completionMarker.innerHTML = `✓ ${task.completionDate}`;
+        completionMarker.title = `完成于 ${task.completionDate}`;
+        titleGroup.appendChild(completionMarker);
+    }
+    // ==========================================================
+
     mainVisibleArea.appendChild(titleGroup);
 
     const metaIndicators = document.createElement('div');
@@ -1150,6 +1168,7 @@ function createTaskContent(task, index, type, isHistoryView) {
 
     return taskContent;
 }
+
 function sortMonthlyTasksByPriority() {
     if (selectedMonthlyDisplayMonth === 'current' && allTasks.monthly && allTasks.monthly.length > 0) {
         allTasks.monthly.sort((a, b) => {
