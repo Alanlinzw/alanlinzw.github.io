@@ -209,28 +209,6 @@ li:hover .action-btn { opacity: 0.7; }
 .action-btn.archive-btn:hover { color: white; background-color: var(--accent-purple); }
 .action-btn img { width: 16px; height: 16px; }
 
-/* 【新增】上移/下移按钮样式 */
-.action-btn.move-up-btn,
-.action-btn.move-down-btn {
-    font-size: 16px; /* 或根据喜好调整 */
-    font-weight: bold;
-    opacity: 0.7; /* 默认可见性，可以调整 */
-}
-.action-btn.move-up-btn:disabled,
-.action-btn.move-down-btn:disabled {
-    opacity: 0.3;
-    cursor: not-allowed;
-    background-color: transparent; /* 确保禁用时背景透明 */
-    transform: none; /* 移除悬停时的放大效果 */
-}
-li:hover .action-btn.move-up-btn, 
-li:hover .action-btn.move-down-btn {
-    opacity: 0.9; /* 悬停时更明显 */
-}
-.action-btn.move-up-btn:hover:not(:disabled),
-.action-btn.move-down-btn:hover:not(:disabled) {
-    color: var(--primary-color); /* 悬停时高亮 */
-}
 
 
 .subtask-list { list-style: none; padding: var(--spacing-sm) 0 0 var(--task-indent); margin: 0; display: flex; flex-direction: column; gap: var(--spacing-sm); }
