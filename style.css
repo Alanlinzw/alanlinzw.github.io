@@ -1008,3 +1008,71 @@ body { padding-bottom: 80px; }
 #features-modal .app-description h3 {
     margin-bottom: var(--spacing-sm);
 }
+
+/* ==========================================================================
+   24. BOTTOM TAB NAV DARK THEME FIX (FINAL & ROBUST)
+   ========================================================================== */
+
+/* 
+ * 针对暗色主题下，底部固定导航栏背景“渗透”问题的最终修复。
+ * 根本原因是其背景被设置为一个 linear-gradient，这极易在 fixed 定位下
+ * 引发浏览器渲染层混合错误。
+ * 
+ * 解决方案是：为其强制指定一个不透明的实体背景色，并使用多种
+ * CSS 技巧强制隔离其渲染层。
+ */
+[data-theme="dark"] .bottom-tab-nav {
+    /* 1. 【核心修复】使用一个不透明的实体颜色变量覆盖掉原来的渐变背景。*/
+    /* var(--modal-bg) 是一个完美的选择，因为它本身就是为顶层UI元素设计的。*/
+    /* 使用 !important 确保拥有最高优先级。*/
+    background-color: var(--modal-bg) !important;
+    background-image: none !important;
+
+    /* 2. 【渲染层隔离】使用多种属性组合，强力提示浏览器为该元素创建独立的渲染层。*/
+    transform: translateZ(0);
+    will-change: transform;
+
+    /* 3. 【层叠上下文隔离】创建全新的层叠上下文，防止与下方元素发生层级混合。*/
+    isolation: isolate;
+
+    /* 4. 【边框颜色统一】确保顶部边框颜色与暗色主题协调。*/
+    border-color: var(--container-border-color);
+}
+
+/* ==========================================================================
+   25. FUTURE TASK REMINDER UI FIX
+   ========================================================================== */
+
+/* 
+ * 优化“未来计划”中提醒信息（铃铛图标 + 时间）的显示效果，
+ * 特别是为了在移动端也能清晰看到提醒时间。
+ */
+
+.reminder-info {
+    /* 1. 将容器变为 Flexbox，以便轻松对齐内部元素 */
+    display: inline-flex;
+    align-items: center; /* 2. 让铃铛图标和时间文本垂直居中对齐 */
+    
+    /* 3. 在图标和文本之间创建一点美观的间隙 */
+    gap: 6px; 
+
+    /* 4. 保持原有的样式 */
+    margin-left: auto; /* 自动推到右侧 */
+    padding-left: 8px; /* 与任务文本保持一些距离 */
+    cursor: help;
+    opacity: 0.8;
+    flex-shrink: 0; /* 防止被压缩 */
+}
+
+/* 5. 为新增的提醒时间文本设置样式 */
+.reminder-datetime-text {
+    font-size: 13px; /* 比任务主文本略小 */
+    font-weight: 500;
+    color: var(--light-text-color);
+    white-space: nowrap; /* 防止时间文本换行 */
+}
+
+/* 确保在深色模式下颜色正确 */
+[data-theme="dark"] .reminder-datetime-text {
+    color: var(--light-text-color);
+}
