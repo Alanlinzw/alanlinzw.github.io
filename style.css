@@ -749,3 +749,32 @@ body { padding-bottom: 80px; }
         height: 36px;
     }
 }
+
+/* --- C. 次要信息提示图标（新） --- */
+.task-meta-indicators {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    margin-left: auto; /* 推到最右边 */
+    flex-shrink: 0;
+    color: var(--light-text-color);
+    font-size: 13px;
+}
+
+.task-meta-indicators span {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+
+/* 【核心修复】使用更具体的选择器，并添加 vertical-align */
+.task-main-visible-area .task-meta-indicators img {
+    width: 16px;
+    height: 16px;
+    opacity: 0.6;
+    vertical-align: middle; /* 确保图标和旁边的文字垂直对齐 */
+}
+
+[data-theme="dark"] .task-meta-indicators img {
+    filter: var(--svg-icon-filter-dark);
+}
