@@ -856,34 +856,7 @@ function renderMonthlyTasks(dataToRender, isHistoryView) {
         li.appendChild(taskMainWrapper);
         li.appendChild(createTaskActions(task, 'monthly', originalIndex, isHistoryView));
         
-        if (!isHistoryView && originalIndex > -1) { 
-            const sortControls = document.createElement('div');
-            sortControls.className = 'mobile-sort-controls';
-            const upBtn = document.createElement('button');
-            upBtn.className = 'mobile-sort-btn';
-            upBtn.innerHTML = '▲';
-            upBtn.title = '上移';
-            upBtn.onclick = (e) => { e.stopPropagation(); moveTask(originalIndex, -1); };
-            const downBtn = document.createElement('button');
-            downBtn.className = 'mobile-sort-btn';
-            downBtn.innerHTML = '▼';
-            downBtn.title = '下移';
-            downBtn.onclick = (e) => { e.stopPropagation(); moveTask(originalIndex, 1); };
-            sortControls.appendChild(upBtn);
-            sortControls.appendChild(downBtn);
-            li.appendChild(sortControls);
-            
-            let pressTimer;
-            li.addEventListener('touchstart', (e) => {
-                if (monthlyTaskList && monthlyTaskList.classList.contains('sort-mode-active')) return;
-                pressTimer = setTimeout(() => { enterSortMode(li); }, 500);
-            }, { passive: true });
-            li.addEventListener('touchend', () => { clearTimeout(pressTimer); });
-            li.addEventListener('touchmove', () => { clearTimeout(pressTimer); });
-        }
-        fragment.appendChild(li);
-    });
-    monthlyTaskList.appendChild(fragment);
+
 
     if (!document.body.dataset.sortModeExitListenerAttached) {
         document.body.addEventListener('click', (e) => {
