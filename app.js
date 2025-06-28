@@ -1030,7 +1030,7 @@ function createTaskContent(task, index, type, isHistoryView) {
     const mainVisibleArea = document.createElement('div');
     mainVisibleArea.className = 'task-main-visible-area';
 
-    // 2. 创建标题组 (包含复选框、优先级、标签、任务文本、完成日期)
+    // 2. 创建标题组
     const titleGroup = document.createElement('div');
     titleGroup.className = 'task-title-group';
     
@@ -1112,7 +1112,7 @@ function createTaskContent(task, index, type, isHistoryView) {
     const metaIndicators = document.createElement('div');
     metaIndicators.className = 'task-meta-indicators';
 
-    // -- 子任务提示图标 --
+    // -- 子任务提示图标 (仅月度) --
     if (type === 'monthly' && task && task.subtasks && task.subtasks.length > 0) {
         const completedCount = task.subtasks.filter(st => st.completed).length;
         const subtaskIndicator = document.createElement('span');
@@ -1121,7 +1121,7 @@ function createTaskContent(task, index, type, isHistoryView) {
         metaIndicators.appendChild(subtaskIndicator);
     }
 
-    // -- 备注提示图标 --
+    // -- 备注提示图标 (所有类型) --
     const noteTextValue = (type === 'daily' && task) ? task.note : (task ? task.progressText : null);
     if (noteTextValue && noteTextValue.trim() !== '') {
         const noteIndicator = document.createElement('span');
@@ -1130,7 +1130,7 @@ function createTaskContent(task, index, type, isHistoryView) {
         metaIndicators.appendChild(noteIndicator);
     }
     
-    // -- 链接提示图标 --
+    // -- 链接提示图标 (所有类型) --
     if (task && task.links && task.links.length > 0) {
         const linkIndicator = document.createElement('span');
         linkIndicator.innerHTML = `<img src="images/icon-link.svg" alt="Links"> ${task.links.length}`;
@@ -1153,9 +1153,14 @@ function createTaskContent(task, index, type, isHistoryView) {
         detailsPane.appendChild(noteDisplayDiv);
     }
 
-    // -- 完整的链接列表 --
+    // -- 完整的链接列表 (每日和月度都有) --
+    // 【修改】之前每日清单的链接在外面，现在统一放入详情面板
     if (task && task.links && task.links.length > 0) {
-        detailsPane.appendChild(createLinkPills(task, type, index));
+        // 使用一个统一的容器来放链接胶囊
+        const linksWrapper = document.createElement('div');
+        linksWrapper.className = 'links-wrapper'; // 新增一个类，方便加样式
+        linksWrapper.appendChild(createLinkPills(task, type, index));
+        detailsPane.appendChild(linksWrapper);
     }
 
     // -- 完整的子任务列表和输入框 (仅月度) --
@@ -1175,6 +1180,7 @@ function createTaskContent(task, index, type, isHistoryView) {
 
     return taskContent;
 }
+
 function sortMonthlyTasksByPriority() {
     if (selectedMonthlyDisplayMonth === 'current' && allTasks.monthly && allTasks.monthly.length > 0) {
         allTasks.monthly.sort((a, b) => {
