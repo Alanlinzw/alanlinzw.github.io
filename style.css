@@ -288,7 +288,7 @@ li:hover .action-btn { opacity: 0.7; }
 #features-list .features-update-list { list-style-type: disc; margin-left: 20px; margin-bottom: 10px; padding-left: 15px; }
 #features-list .features-update-list li { margin-bottom: 4px; line-height: 1.4; font-size: 0.95em; }
 #features-list .features-version-info { margin-top: 10px; font-style: italic; font-size: 0.9em; color: var(--light-text-color); }
-.links-container { display: flex; flex-wrap: wrap; gap: 8px; padding-left: var(--task-indent); margin-top: var(--spacing-xs); }
+.links-container { display: flex; flex-wrap: wrap; gap: 8px; margin-top: var(--spacing-xs); }
 #future-task-list .links-container { padding-left: 0; }
 .link-pill { display: inline-flex; align-items: center; gap: 8px; background-color: color-mix(in srgb, var(--accent-teal) 15%, transparent); color: var(--accent-teal); border: 1px solid color-mix(in srgb, var(--accent-teal) 40%, transparent); border-radius: var(--border-radius-pill); padding: 4px 6px 4px 12px; font-size: 13px; font-weight: 500; text-decoration: none; transition: all 0.2s ease; }
 .link-pill:hover { background-color: color-mix(in srgb, var(--accent-teal) 25%, transparent); color: var(--accent-teal-hover); border-color: var(--accent-teal); transform: translateY(-1px); }
@@ -726,34 +726,95 @@ body { padding-bottom: 80px; }
 
 
 /* ==========================================================================
-   21 & 22. FINAL MOBILE UI STYLES
+   21 & 22. FINAL MOBILE UI STYLES (REVISED)
    ========================================================================== */
 
 @media (max-width: 768px) {
 
     /* --- A. 通用任务条目基础样式 --- */
     .task-list li {
-        flex-direction: row; /* 【改回】保持手柄和内容在同一行 */
-        align-items: flex-start; /* 垂直对齐 */
-        flex-wrap: wrap; /* 允许内容换行 */
-    }
-
-    /* 拖拽手柄在移动端始终可见 */
-    .task-list li .drag-handle {
-        display: flex !important; 
-        align-self: flex-start; /* 确保手柄与任务内容顶部对齐 */
-        padding-top: 4px; /* 微调手柄垂直位置 */
-    }
-
-    .task-list li .task-content {
-        flex: 1; /* 让内容区占据剩余空间 */
-        min-width: 0;
+        display: flex; /* 让手柄和内容区在同一行开始 */
+        flex-wrap: wrap; /* 允许详情面板换行 */
+        align-items: flex-start;
+        padding: var(--spacing-md);
+        transition: background-color 0.3s ease, box-shadow 0.3s ease;
     }
     
-    /* 默认隐藏详情面板 */
-    .task-list li .task-details-pane {
+    /* 移动端拖拽手柄样式 */
+    .task-list li .drag-handle {
+        display: flex !important; 
+        align-self: flex-start;
+        padding-top: 4px;
+    }
+
+    /* 任务内容区占据剩余所有空间 */
+    .task-list li .task-content {
+        flex: 1;
+        min-width: 0; /* 允许内容区收缩 */
+    }
+    
+    /* --- B. 始终可见的顶层区域 (Flexbox 布局) --- */
+    .task-main-visible-area {
+        display: flex;
+        align-items: center; /* 垂直居中对齐 */
+        width: 100%;
+        gap: var(--spacing-sm); /* 标题和图标之间的间隙 */
+        cursor: pointer;
+    }
+    
+    /* --- C. 标题组 (包含复选框, 任务文本等) --- */
+    .task-title-group {
+        display: flex;
+        align-items: center;
+        gap: var(--spacing-sm);
+        flex-grow: 1; /* 占据所有可用空间 */
+        min-width: 0; /* 【关键】允许这个容器被压缩 */
+    }
+
+    .task-text {
+        white-space: nowrap; /* 强制不换行 */
+        overflow: hidden; /* 隐藏溢出部分 */
+        text-overflow: ellipsis; /* 显示省略号 */
+        flex-grow: 1; /* 再次确保它在title-group内是弹性的 */
+        min-width: 0; /* 允许文本元素本身被压缩 */
+        font-size: 16px;
+    }
+    
+    .task-list li.is-expanded .task-text {
+        white-space: normal; /* 展开后允许任务文本正常换行 */
+    }
+
+    /* --- D. 右侧的提示图标容器 --- */
+    .task-meta-indicators {
+        display: flex;
+        align-items: center;
+        gap: var(--spacing-sm);
+        flex-shrink: 0; /* 【关键】禁止这个容器被压缩 */
+        color: var(--light-text-color);
+        font-size: 13px;
+    }
+
+    .task-meta-indicators span {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+    }
+
+    .task-meta-indicators img {
+        width: 16px;
+        height: 16px;
+        opacity: 0.6;
+        vertical-align: middle;
+    }
+    
+    [data-theme="dark"] .task-meta-indicators img {
+        filter: var(--svg-icon-filter-dark);
+    }
+
+    /* --- E. 展开的详情面板 --- */
+    .task-details-pane {
         display: none;
-        flex-basis: 100%; /* 【新增】让详情面板占据完整的一行 */
+        flex-basis: 100%; /* 让详情面板始终占据完整的一行 */
         flex-direction: column;
         gap: var(--spacing-md);
         padding-top: var(--spacing-md);
@@ -767,20 +828,69 @@ body { padding-bottom: 80px; }
         to { opacity: 1; transform: translateY(0); }
     }
 
-    /* 展开状态下的样式 */
-    .task-list li.is-expanded {
-        background-color: color-mix(in srgb, var(--primary-color) 5%, var(--card-bg));
-        box-shadow: 0 0 0 1px color-mix(in srgb, var(--primary-color) 40%, transparent), var(--shadow-md);
+    .task-list li.is-expanded .task-details-pane {
+        display: flex;
     }
 
-    .task-list li.is-expanded .task-details-pane {
-        display: flex; /* 展开时显示 */
+    /* 详情面板中的子元素样式 */
+    .task-details-pane .subtask-list,
+    .task-details-pane .links-container,
+    .task-details-pane .note-display-text,
+    .task-details-pane .subtask-input-area,
+    .task-details-pane .links-wrapper {
+        margin-left: 0 !important;
+        padding-left: 0 !important;
     }
     
-    .task-list li.is-expanded .task-text {
-        white-space: normal; /* 展开后允许任务文本换行 */
+    .task-details-pane .note-display-text {
+        display: block;
+        padding-left: calc(var(--spacing-md) + 10px) !important;
+        position: relative;
+    }
+    .note-display-text::before {
+        content: '';
+        position: absolute;
+        left: 0; top: 0;
+        width: 4px; height: 100%;
+        background-color: var(--accent-amber);
+        opacity: 0.8;
     }
 
+    /* --- F. 统一的操作工具栏 --- */
+    .task-actions {
+        display: flex;
+        justify-content: space-around;
+        width: 100%;
+        background-color: var(--control-bg);
+        border: 1px solid var(--card-border-color);
+        border-radius: var(--border-radius-pill);
+        padding: var(--spacing-xs);
+        margin-top: var(--spacing-sm);
+    }
+
+    .task-actions .action-btn {
+        opacity: 0.8;
+        flex: 1;
+        height: 36px;
+    }
+
+    /* --- G. 水平子任务样式 --- */
+    .subtask-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: var(--spacing-sm);
+        padding-left: 0;
+        margin-top: var(--spacing-sm);
+    }
+    .subtask-item {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--spacing-xs);
+        padding: 6px 12px;
+        border: 1px solid var(--control-border-color);
+        border-radius: var(--border-radius-pill);
+        background-color: var(--control-bg);
+    }
     /* 子任务列表、链接、备注等在详情面板中 */
     .task-details-pane .subtask-list,
     .task-details-pane .links-container,
