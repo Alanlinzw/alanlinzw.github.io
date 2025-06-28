@@ -889,6 +889,7 @@ function renderMonthlyTasks(dataToRender, isHistoryView) {
     }
 }
 
+// 在 app.js 中，用这个版本替换掉你原来的 renderFutureTasks 函数
 function renderFutureTasks(tasksToRender) {
     if (!futureTaskList) return;
     futureTaskList.innerHTML = '';
@@ -921,14 +922,26 @@ function renderFutureTasks(tasksToRender) {
         taskText.textContent = task.text;
         titleGroup.appendChild(taskText);
         
+        // ======================= 核心修改在此 =======================
         if (task.reminderTime && task.reminderTime > Date.now()) {
             const reminderSpan = document.createElement('span');
             reminderSpan.className = 'reminder-info';
-            reminderSpan.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>`;
+            
+            // 使用新函数格式化时间
+            const formattedDateTime = formatReminderDateTime(task.reminderTime);
+
+            // 同时创建铃铛图标和时间文本
+            reminderSpan.innerHTML = `
+                <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+                <span class="reminder-datetime-text">${formattedDateTime}</span>
+            `;
+
             const reminderDate = new Date(task.reminderTime);
-            reminderSpan.title = `提醒于: ${reminderDate.toLocaleString()}`;
+            reminderSpan.title = `提醒于: ${reminderDate.toLocaleString()}`; // 保留桌面端的悬停提示
             titleGroup.appendChild(reminderSpan);
+
         } else if (task.date) {
+        // ======================= 修改结束 =======================
             const dateSpan = document.createElement('span');
             dateSpan.className = 'task-date';
             dateSpan.textContent = task.date.substring(5); 
@@ -948,6 +961,7 @@ function renderFutureTasks(tasksToRender) {
     });
     futureTaskList.appendChild(fragment);
 }
+
 function renderLedger(dataToRender, isHistoryView) {
     if (!ledgerList) return;
     const currency = allTasks.currencySymbol || '$';
@@ -1946,6 +1960,23 @@ function renderLedgerSummary(dataToRender) {
     });
 }
 function getTodayString() { const today = new Date(); const year = today.getFullYear(); const month = String(today.getMonth() + 1).padStart(2, '0'); const day = String(today.getDate()).padStart(2, '0'); return `${year}-${month}-${day}`; }
+function formatReminderDateTime(timestamp) {
+    if (!timestamp) return '';
+    try {
+        const date = new Date(timestamp);
+        if (isNaN(date.getTime())) return ''; // 无效日期检查
+
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        const hours = String(date.getHours()).padStart(2, '0');
+        const minutes = String(date.getMinutes()).padStart(2, '0');
+
+        return `${month}-${day} ${hours}:${minutes}`;
+    } catch (e) {
+        console.error("Error formatting reminder date:", e);
+        return '';
+    }
+}
 function createDragHandle() { const handle = document.createElement('div'); handle.className = 'drag-handle'; handle.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M2 11h12v2H2zm0-5h12v2H2zm0-5h12v2H2z"/></svg>`; handle.title = '拖拽排序'; return handle; }
 function openHistoryModal(type) { 
     historyModalFor = type; 
