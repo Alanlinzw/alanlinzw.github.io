@@ -41,7 +41,6 @@
                 <button id="theme-toggle-btn" title="切换主题" class="always-visible-action">
                     <img src="images/icon-theme.svg" alt="Theme">
                 </button>
- <a href="https://alanlinzw.github.io/privacy-policy-for-chrome-extension/" target="_blank" rel="noopener noreferrer">隐私政策</a>
                 <!-- “更多”按钮，在移动端显示 -->
                 <button id="more-actions-btn" class="more-actions-toggle" title="更多操作">
                     <img src="images/icon-more-dots.svg" alt="More">
@@ -64,23 +63,19 @@
                         <img src="images/icon-donate.svg" alt="Donate">
                         <span>赞赏支持</span>
                     </button>
-               
+    <a href="https://alanlinzw.github.io/privacy-policy-for-chrome-extension/" target="_blank" rel="noopener noreferrer" id="privacy-policy-btn" class="more-actions-menu-item" title="查看隐私政策">
+        <img src="images/icon-privacy.svg" alt="Privacy">
+        <span>隐私政策</span>
+    </a>
+
+    <a href="https://chromewebstore.google.com/detail/%E9%AB%98%E6%95%88%E5%BE%85%E5%8A%9E%E6%B8%85%E5%8D%95-to-do-list/mheohepgmiboifooaamlgfimpmmcapha" target="_blank" rel="noopener noreferrer" id="chrome-extension-btn" class="more-actions-menu-item" title="Chrome插件版">
+        <img src="images/icon-chrome.svg" alt="Chrome Extension">
+        <span>谷歌插件</span>
+    </a>
                 </div>
             </div>
         </div>
 
-                <div class="app-description">
-            <div class="description-lang-zh">
-                <h3>关于本应用 (高效待办清单)</h3>
-                <p>这是一款全面的个人生产力工具，旨在帮助您管理任务、规划未来和简易记账。它利用 Google Drive API 为您提供安全的数据备份和跨设备同步功能。</p>
- 
-                <ul>
-                    <li>为您提供一个可靠、由您自己掌控的云端备份，用于存储您的任务、计划和账单数据。</li>
-                    <li>让您可以在安装了本应用的多个设备（如手机和电脑）之间无缝同步数据。</li>
-      
-                </ul>
-            </div>
-        </div>
         
         <div class="search-container">
             <img src="images/icon-search.svg" alt="Search" class="search-icon">
@@ -242,6 +237,12 @@
         <div class="modal-content features-modal-content has-sticky-footer">
             <button id="features-modal-close-btn" class="modal-close">×</button>
             <h2>功能 & 亮点</h2>
+                <div class="app-description">
+            <div class="description-lang-zh">
+                <h3>关于本应用</h3>
+                <p>这是一款全面的个人生产力工具，旨在帮助您管理任务、规划未来和简易记账。它利用 Google Drive为您提供安全的数据备份和跨设备同步功能。由您自己掌控的云端备份，用于存储任务、计划和账单数据。并可以在安装了本应用的多个设备（如手机和电脑）之间无缝同步数据。</p>
+            </div>
+        </div>
             <ul id="features-list" class="features-list-style"></ul>
         </div>
     </div>
