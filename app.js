@@ -2891,16 +2891,33 @@ if (syncDriveBtn && syncStatusSpan) {
                 if (!driveSync.tokenClient) throw new Error('Google API 客户端未能成功初始化。');
             }
 
-            // 2.2. 智能认证 (先静默，失败再弹窗)
-            try {
-                syncStatusSpan.textContent = '验证身份...';
-                await driveSync.authenticate(); // 默认尝试静默刷新 (prompt: 'none')
-            } catch (authError) {
-                // 如果静默授权失败，则强制进行交互式授权
-                console.warn("driveSync: Silent authentication failed. Attempting interactive auth.", authError.message);
-                syncStatusSpan.textContent = '需要授权...';
-                await driveSync.authenticate(true); // 强制弹窗
-            }
+    // 2.2. 【全新线性授权流程】
+    syncStatusSpan.textContent = '验证身份...';
+    let token = driveSync.gapi.client.getToken();
+
+    // 检查是否需要获取令牌 (首次或已过期)
+    if (!token) {
+        try {
+            // 第一步：尝试静默获取
+            console.log("Token not found, attempting silent authentication...");
+            await driveSync.authenticate(); // 默认静默
+            token = driveSync.gapi.client.getToken(); // 更新令牌变量
+        } catch (silentAuthError) {
+            // 静默失败，这很正常，现在需要用户交互
+            console.warn("Silent authentication failed, proceeding to interactive auth.", silentAuthError.message);
+            syncStatusSpan.textContent = '需要授权...';
+            // 第二步：进行交互式授权
+            await driveSync.authenticate(true); // 强制弹窗
+            token = driveSync.gapi.client.getToken(); // 更新令牌变量
+        }
+    }
+
+    // 在继续之前，最后检查一次令牌是否存在。如果用户在所有流程中都取消了，这里会是 null。
+    if (!token) {
+        // 如果到这里还是没有令牌，说明用户在所有授权尝试中都失败或取消了。
+        // 我们直接抛出一个清晰的错误，由外层 catch 处理，并终止同步流程。
+        throw new Error("未能获取授权令牌，同步操作已终止。");
+    }
 
             // 2.3. 定义一个带重试逻辑的 API 执行函数 (核心设计模式)
             const callDriveApi = async (apiFunction, ...args) => {
