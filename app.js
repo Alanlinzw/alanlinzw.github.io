@@ -2838,170 +2838,144 @@ window.addEventListener('visibilitychange', () => {
 window.addEventListener('focus', triggerSync);
 
 // (在 bindEventListeners 函数内部)
+// (在 app.js 的 bindEventListeners 函数内部)
 if (syncDriveBtn && syncStatusSpan) {
     syncDriveBtn.addEventListener('click', async () => {
-        // 【新增】在手动同步开始时，取消待处理的自动同步
+        // 1. 如果有自动同步在等待，取消它，因为我们要手动同步了
         if (autoSyncTimer) {
             clearTimeout(autoSyncTimer);
             autoSyncTimer = null;
             console.log('Manual sync initiated, pending auto-sync cancelled.');
         }
+
         console.log("同步按钮被点击。");
         syncStatusSpan.textContent = '初始化同步...';
         syncDriveBtn.disabled = true;
-        // 【步骤1】定义一个成功标志位
-        let syncSucceeded = false;
-       try {
-    // 1. 检查 API 客户端是否准备就绪 (逻辑不变)
-    if (!driveSync.tokenClient) {
-        console.log("Sync: Google API 客户端未就绪，尝试重新初始化。");
-        await loadGoogleApis();
-        if (!driveSync.tokenClient) {
-            throw new Error('Google API 客户端未能成功初始化。');
-        }
-        console.log("Sync: Google API 客户端重新初始化成功。");
-    }
 
-   // ==========================================================
-            // 【核心修改】智能授权流程
+        // 2. 定义成功标志位，这是关键
+        let syncSucceeded = false;
+
+        try {
             // ==========================================================
-            const token = driveSync.gapi.client.getToken();
-            // 如果 gapi 客户端当前没有令牌（null），或者令牌已过期（这部分gapi内部会处理，
-            // 但明确检查 null 是个好习惯），则启动完整的授权流程。
-            if (token === null) {
-                console.log("Sync: No token found. Initiating full authentication.");
-                syncStatusSpan.textContent = '需要授权...';
-                await driveSync.authenticate();
-            } else {
-                console.log("Sync: Token already exists. Proceeding without re-authentication.");
-                // 如果已有令牌，我们可以信任 gapi 内部的令牌刷新机制，直接继续。
-            }
+            //  同步流程开始
             // ==========================================================
             
-            // 3. 查找或创建云端文件
+            // 检查 API 客户端
+            if (!driveSync.tokenClient) {
+                await loadGoogleApis();
+                if (!driveSync.tokenClient) throw new Error('Google API 客户端未能成功初始化。');
+            }
+
+            // 授权
+            const token = driveSync.gapi.client.getToken();
+            if (token === null) {
+                syncStatusSpan.textContent = '需要授权...';
+                await driveSync.authenticate();
+            }
+
+            // 查找文件 (包含401错误重试授权的逻辑)
             syncStatusSpan.textContent = '查找云文件...';
-            // 【重要】我们把对 findOrCreateFile 的调用放在 try-catch 块中，
-            // 以便捕获因令牌过期而导致的 401 错误。
             try {
                 await driveSync.findOrCreateFile();
-            } catch (error) {
-                // 检查错误是否是授权问题 (通常是 401 Unauthorized)
-                if (error && (error.status === 401 || (error.result && error.result.error && error.result.error.code === 401))) {
-                    console.warn("Sync: API call failed with 401. Token might be expired or revoked. Re-authenticating...");
+            } catch (apiError) {
+                if (apiError && (apiError.status === 401 || (apiError.result && apiError.result.error && apiError.result.error.code === 401))) {
                     syncStatusSpan.textContent = '令牌失效，重新授权...';
-                    
-                    // 强制清除可能无效的旧令牌
                     driveSync.gapi.client.setToken(null);
-                    
-                    // 再次调用 authenticate
                     await driveSync.authenticate();
-                    
-                    // 重试 findOrCreateFile
-                    console.log("Sync: Retrying findOrCreateFile after re-authentication.");
                     await driveSync.findOrCreateFile();
                 } else {
-                    // 如果是其他错误 (如网络问题、文件权限问题等)，则直接抛出
-                    throw error;
+                    throw apiError;
+                }
+            }
+            if (!driveSync.driveFileId) throw new Error('未能找到或创建云端文件。');
+
+            // 下载云端数据
+            syncStatusSpan.textContent = '下载云数据...';
+            const cloudData = await driveSync.download();
+            
+            // 获取本地数据
+            let localData = await db.get('allTasks');
+            if (!localData || typeof localData !== 'object') {
+                localData = { daily: [], monthly: [], future: [], ledger: [], history: {}, ledgerHistory: {}, budgets: {}, currencySymbol: '$', lastUpdatedLocal: 0 };
+            }
+            
+            // ==========================================================
+            //  ↓↓↓ 这里是之前被省略的核心比较与合并逻辑 ↓↓↓
+            // ==========================================================
+
+            const isFirstSyncCompleted = await db.get('isFirstSyncCompleted');
+
+            if (isFirstSyncCompleted !== true && cloudData && Object.keys(cloudData).length > 0) {
+                // --- 场景：首次同步，且云端有数据 ---
+                console.log("首次同步检测：执行数据合并策略。");
+                syncStatusSpan.textContent = '首次同步，正在合并数据...';
+
+                const mergedTasks = {
+                    daily: [...(cloudData.daily || []), ...(localData.daily || [])],
+                    monthly: [...(cloudData.monthly || []), ...(localData.monthly || [])],
+                    future: [...(cloudData.future || []), ...(localData.future || [])],
+                    ledger: [...(cloudData.ledger || []), ...(localData.ledger || [])],
+                    history: { ...cloudData.history, ...localData.history },
+                    ledgerHistory: { ...cloudData.ledgerHistory, ...localData.ledgerHistory },
+                    budgets: { ...cloudData.budgets, ...localData.budgets },
+                    currencySymbol: cloudData.currencySymbol || localData.currencySymbol || '$',
+                    lastUpdatedLocal: Date.now() 
+                };
+                
+                allTasks = mergedTasks;
+                
+                console.log("正在上传合并后的数据...");
+                await driveSync.upload(allTasks);
+                await db.set('allTasks', allTasks);
+                await db.set('isFirstSyncCompleted', true);
+                
+                syncStatusSpan.textContent = '数据合并并同步成功！';
+                renderAllLists();
+
+            } else {
+                // --- 场景：常规同步，或首次同步但云端无数据 ---
+                console.log("常规同步检测：执行基于时间戳的覆盖策略。");
+
+                if (cloudData && typeof cloudData === 'object' && cloudData.lastUpdatedLocal && 
+                    cloudData.lastUpdatedLocal > (localData.lastUpdatedLocal || 0)) {
+                    // 云端较新，覆盖本地
+                    syncStatusSpan.textContent = '云端数据较新，正在同步...';
+                    allTasks = cloudData;
+                    await db.set('allTasks', allTasks);
+                    renderAllLists();
+                    syncStatusSpan.textContent = '已从云端同步！';
+                } else {
+                    // 本地较新或与云端一致，上传本地
+                    syncStatusSpan.textContent = '上传本地数据...';
+                    allTasks = localData; 
+                    const uploadResult = await driveSync.upload(allTasks);
+                    syncStatusSpan.textContent = uploadResult.message;
+                }
+
+                if (isFirstSyncCompleted !== true) {
+                    await db.set('isFirstSyncCompleted', true);
                 }
             }
 
-            if (!driveSync.driveFileId) throw new Error('未能找到或创建云端文件。');
-        
-            // 4. 下载云端数据
-            syncStatusSpan.textContent = '下载云数据...';
-            const cloudData = await driveSync.download();
-    
-    // 5. 获取本地数据 (逻辑不变)
-    let localData = await db.get('allTasks');
-    if (!localData || typeof localData !== 'object') {
-        localData = { daily: [], monthly: [], future: [], ledger: [], history: {}, ledgerHistory: {}, budgets: {}, currencySymbol: '$', lastUpdatedLocal: 0 };
-    }
-    
-    // ====================================================================
-    // 【全新】首次同步与常规同步的判断与合并逻辑
-    // ====================================================================
-
-    const isFirstSyncCompleted = await db.get('isFirstSyncCompleted');
-
-    if (isFirstSyncCompleted !== true && cloudData && Object.keys(cloudData).length > 0) {
-        // --- 场景：首次同步，且云端有数据（来自插件版） ---
-        console.log("首次同步检测：执行数据合并策略。");
-        syncStatusSpan.textContent = '首次同步，正在合并数据...';
-
-        // **合并逻辑**
-        // 简单但有效的合并：将 PWA 的新数据追加到从云端下载的数据后面
-        // 注意：这种合并可能会产生重复项，但避免了数据丢失，用户可以手动清理。
-        const mergedTasks = {
-            daily: [...cloudData.daily, ...localData.daily],
-            monthly: [...cloudData.monthly, ...localData.monthly],
-            future: [...cloudData.future, ...localData.future],
-            ledger: [...cloudData.ledger, ...localData.ledger],
-            // 历史和预算等，暂时优先使用云端的
-            history: cloudData.history || {},
-            ledgerHistory: cloudData.ledgerHistory || {},
-            budgets: cloudData.budgets || {},
-            // 货币符号也优先使用云端的
-            currencySymbol: cloudData.currencySymbol || localData.currencySymbol,
-            // 使用最新的时间戳，以便上传
-            lastUpdatedLocal: Date.now() 
-        };
-        
-        // 使用合并后的数据更新 allTasks
-        allTasks = mergedTasks;
-        
-        // 将合并后的数据上传回 Google Drive
-        console.log("正在上传合并后的数据...");
-        await driveSync.upload(allTasks);
-
-        // 将合并后的数据保存到本地 IndexedDB
-        await db.set('allTasks', allTasks);
-        
-        // 【关键】标记首次同步已完成
-        await db.set('isFirstSyncCompleted', true);
-        
-        syncStatusSpan.textContent = '数据合并并同步成功！';
-        renderAllLists(); // 渲染合并后的列表
-
-    } else {
-        // --- 场景：常规同步（非首次），或首次同步但云端无数据 ---
-        console.log("常规同步检测：执行基于时间戳的覆盖策略。");
-
-        if (cloudData && typeof cloudData === 'object' && cloudData.lastUpdatedLocal && 
-            cloudData.lastUpdatedLocal > (localData.lastUpdatedLocal || 0)) {
-            // 云端较新，覆盖本地
-            syncStatusSpan.textContent = '云端数据较新，正在同步...';
-            allTasks = cloudData;
-            await db.set('allTasks', allTasks);
-            renderAllLists();
-            syncStatusSpan.textContent = '已从云端同步！';
-        } else {
-            // 本地较新或与云端一致，上传本地
-            syncStatusSpan.textContent = '上传本地数据...';
-            allTasks = localData; // 确保上传的是最新的本地数据
-            const uploadResult = await driveSync.upload(allTasks);
-            syncStatusSpan.textContent = uploadResult.message;
-            isDataDirty = false; // 上传成功，数据干净了
-            updateSyncIndicator(); // 更新UI提示
-        }
-
-        // 如果这是首次同步（但云端为空），现在也标记为完成
-        if (isFirstSyncCompleted !== true) {
-            await db.set('isFirstSyncCompleted', true);
-        }
-    }
-
-            // 【步骤2】标记同步成功
-            syncSucceeded = true;
+            // ==========================================================
+            //  ↑↑↑ 核心比较与合并逻辑结束 ↑↑↑
+            // ==========================================================
             
-            // 清除“脏数据”状态，因为我们已经成功同步
-            isDataDirty = false; 
+            // 3. 如果代码执行到这里没有出错，说明同步成功
+            syncSucceeded = true;
+
+            // 4. 更新UI状态
+            isDataDirty = false; // 数据不再是“脏”的
             updateSyncIndicator();
 
-        } catch (error) {
+        } catch (error) { // 捕获上面 try 块中发生的任何错误
+            
+            // 错误处理逻辑 (这里可以安全访问 error 变量)
             console.error("同步操作失败:", error);
             const errorMessage = error.message || '未知错误';
             syncStatusSpan.textContent = `同步错误: ${errorMessage.substring(0, 40)}...`;
-             if (errorMessage.includes("popup_closed_by_user") || errorMessage.includes("access_denied")) {
+
+            if (errorMessage.includes("popup_closed_by_user") || errorMessage.includes("access_denied")) {
                 openCustomPrompt({
                     title: "授权取消",
                     message: "您取消了 Google Drive 授权。同步操作无法继续。",
@@ -3018,34 +2992,36 @@ if (syncDriveBtn && syncStatusSpan) {
                     hideCancelButton: true
                 });
             }
-        } finally {
+
+        } finally { // 无论成功或失败，都会执行这里
+
+            // 5. 重新启用按钮
             syncDriveBtn.disabled = false;
-if (!error) { 
-    const now = new Date();
-    const timeString = now.toLocaleTimeString();
-    localStorage.setItem('lastSyncTime', timeString);
-    syncStatusSpan.textContent = `同步于 ${timeString}`;
-}
             console.log("Sync: 同步流程结束，按钮已重新启用。");
 
-   // 【步骤3】使用成功标志位来判断
+            // 6. 使用 syncSucceeded 标志位来判断
             if (syncSucceeded) {
                 const now = new Date();
                 const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                 localStorage.setItem('lastSyncTime', timeString);
-                // 仅在非“需要同步”状态下更新为最后同步时间
-                if (!isDataDirty) { 
+                
+                // 只有在数据不是“脏”状态时，才显示最后同步时间
+                if (!isDataDirty && syncStatusSpan) {
                     syncStatusSpan.textContent = `同步于 ${timeString}`;
                 }
             }
-            setTimeout(() => { if (syncStatusSpan) syncStatusSpan.textContent = ''; }, 7000);
+
+            // 7. 在一段时间后，清空状态提示（除非有未同步的更改）
+            setTimeout(() => {
+                if (!isDataDirty && syncStatusSpan) {
+                    syncStatusSpan.textContent = '';
+                }
+            }, 7000);
         }
     });
 }
 
-        // 确保统计模态框内的时间选择器事件被绑定
-    setupStatsTimespanSelectors();
-}
+
 
 // 在 app.js 的 loadTasks 成功后，或 initializeApp 的末尾
 
@@ -3061,23 +3037,6 @@ async function initializeApp() {
     renderAllLists();
     // ...
 }
-
-// 当点击统计按钮时，app.js 可以先确保数据已传递
-// (在 app.js 的 bindEventListeners 中)
-    if (statsBtn) {
-        statsBtn.addEventListener('click', () => {
-            // 确保统计模态框的 DOM 元素存在
-            if (statsModal) {
-                // 调用我们在 app.js 中新定义的、统一的统计处理函数
-                handleStatsButtonClick();
-            } else {
-                // 如果模态框不存在，在控制台给出警告
-                console.warn("统计模态框的 DOM 元素 (statsModal) 未找到。");
-                // 你也可以在这里给用户一个提示，比如弹出一个自定义提示框
-                // openCustomPrompt({title:"错误", message:"无法打开统计分析，相关界面元素丢失。", inputType:'none', confirmText:'好的', hideCancelButton:true});
-            }
-        });
-    }
 
 
 
@@ -3124,6 +3083,27 @@ async function loadGoogleApis() {
             }
         }, 15000); // 15秒超时
     });
+}
+
+// 当点击统计按钮时，app.js 可以先确保数据已传递
+// (在 app.js 的 bindEventListeners 中)
+    if (statsBtn) {
+        statsBtn.addEventListener('click', () => {
+            // 确保统计模态框的 DOM 元素存在
+            if (statsModal) {
+                // 调用我们在 app.js 中新定义的、统一的统计处理函数
+                handleStatsButtonClick();
+            } else {
+                // 如果模态框不存在，在控制台给出警告
+                console.warn("统计模态框的 DOM 元素 (statsModal) 未找到。");
+                // 你也可以在这里给用户一个提示，比如弹出一个自定义提示框
+                // openCustomPrompt({title:"错误", message:"无法打开统计分析，相关界面元素丢失。", inputType:'none', confirmText:'好的', hideCancelButton:true});
+            }
+        });
+    }
+
+        // 确保统计模态框内的时间选择器事件被绑定
+    setupStatsTimespanSelectors();
 }
 // ========================================================================
 // 统计分析图表功能
