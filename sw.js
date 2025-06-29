@@ -139,11 +139,6 @@ self.addEventListener('activate', event => {
             })
         )).then(() => {
             console.log('[SW] Old caches deleted, claiming clients.');
-            // 立即检查一次，以处理离线时到期的任务
-            checkAndShowNotifications();
-            
-            // 模拟定期检查（这仍然不是最完美的，但比单个 setTimeout 好）
-            setInterval(checkAndShowNotifications, 60 * 1000); // 例如每分钟检查一次
             return self.clients.claim(); // 确保新的 SW 立即控制所有打开的客户端
         })
     );
@@ -240,31 +235,44 @@ self.addEventListener('fetch', event => {
 // ========================================================================
 // 2. 监听来自主应用的消息来安排提醒
 // ========================================================================
-// 【修改后 - 更可靠的代码】
 self.addEventListener('message', event => {
-    // --- 删掉的部分：不再需要为每个任务单独处理 setTimeout ---
-
-    // 保留其他消息的处理逻辑
-    if (event.data && event.data.action === 'skipWaiting') {
+    if (event.data && event.data.type === 'SCHEDULE_REMINDER') {
+        const { task } = event.data.payload;
+        if (!task || !task.reminderTime || !task.id) {
+            console.error('[SW] Invalid task data for reminder:', task);
+            return;
+        }
+        console.log('[SW] Received SCHEDULE_REMINDER for task:', task.id, new Date(task.reminderTime));
+        const delay = new Date(task.reminderTime).getTime() - Date.now();
+        if (delay > 0) {
+            console.log(`[SW] Scheduling notification check in ${delay}ms for task ${task.id}`);
+            // 注意: setTimeout 在 Service Worker 中可能因 SW 休眠而不可靠。
+            // 真实生产环境应结合 Push API 或 Periodic Background Sync API。
+            // 此处为简化，依赖于 SW 在需要时被激活（例如通过 fetch, push, sync 事件）。
+            // 或者客户端在应用启动时触发检查。
+            setTimeout(() => {
+                console.log(`[SW] Timeout reached for task ${task.id}. Checking notifications.`);
+                checkAndShowNotifications();
+            }, delay);
+        } else if (task.reminderTime && task.reminderTime <= Date.now()) {
+            // 如果任务已经是过去的，立即检查（可能是在应用启动时补发）
+            console.log('[SW] Task reminder time is in the past, checking notifications now for task:', task.id);
+            checkAndShowNotifications();
+        }
+    } else if (event.data && event.data.action === 'skipWaiting') {
         self.skipWaiting();
-    }
-
-    // --- 主要修改在这里：统一处理所有与提醒相关的消息 ---
-    else if (event.data && (
-        event.data.type === 'SCHEDULE_REMINDER' || 
-        event.data.type === 'UPDATE_REMINDER' || 
-        event.data.type === 'CANCEL_REMINDER'
-    )) {
-        console.log(`[SW] Received ${event.data.type}. The future tasks list has changed.`);
-        console.log('[SW] Triggering an immediate check for any due notifications.');
-        
-        // +++ 新增的核心逻辑：
-        // 无论是什么操作（新增、更新、删除提醒），
-        // 都意味着未来任务列表的状态可能变了。
-        // 最简单、最可靠的应对方式就是立即完整地检查一遍。
-        checkAndShowNotifications();
+    } else if (event.data && event.data.type === 'UPDATE_REMINDER') { // 【NEW】处理提醒更新
+        // 简单处理：当 SW 下次检查通知时，会使用更新后的任务信息。
+        // 更复杂的实现会取消旧的 setTimeout (如果用 task.id 作为 key 存储 timeoutId) 并设置新的。
+        console.log('[SW] Received UPDATE_REMINDER for task ID:', event.data.payload.task.id, '. Reminder will be based on updated data during next check.');
+    } else if (event.data && event.data.type === 'CANCEL_REMINDER') { // 【NEW】处理提醒取消
+        // 简单处理：如果任务从 allTasks.future 中被删除或其 reminderTime 被清除，
+        // checkAndShowNotifications 自然不会为它发送通知。
+        // 更复杂的实现会清除特定的 setTimeout。
+        console.log('[SW] Received CANCEL_REMINDER for task ID:', event.data.payload.taskId, '. Notification (if pending via setTimeout) may still fire unless task data is updated/removed.');
     }
 });
+
 
 // ========================================================================
 // 3. 核心：本地通知检查与显示逻辑 (重构)
