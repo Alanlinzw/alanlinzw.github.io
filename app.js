@@ -2849,7 +2849,8 @@ if (syncDriveBtn && syncStatusSpan) {
         console.log("同步按钮被点击。");
         syncStatusSpan.textContent = '初始化同步...';
         syncDriveBtn.disabled = true;
-
+        // 【步骤1】定义一个成功标志位
+        let syncSucceeded = false;
        try {
     // 1. 检查 API 客户端是否准备就绪 (逻辑不变)
     if (!driveSync.tokenClient) {
@@ -2989,6 +2990,13 @@ if (syncDriveBtn && syncStatusSpan) {
         }
     }
 
+            // 【步骤2】标记同步成功
+            syncSucceeded = true;
+            
+            // 清除“脏数据”状态，因为我们已经成功同步
+            isDataDirty = false; 
+            updateSyncIndicator();
+
         } catch (error) {
             console.error("同步操作失败:", error);
             const errorMessage = error.message || '未知错误';
@@ -3019,6 +3027,17 @@ if (!error) {
     syncStatusSpan.textContent = `同步于 ${timeString}`;
 }
             console.log("Sync: 同步流程结束，按钮已重新启用。");
+
+   // 【步骤3】使用成功标志位来判断
+            if (syncSucceeded) {
+                const now = new Date();
+                const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                localStorage.setItem('lastSyncTime', timeString);
+                // 仅在非“需要同步”状态下更新为最后同步时间
+                if (!isDataDirty) { 
+                    syncStatusSpan.textContent = `同步于 ${timeString}`;
+                }
+            }
             setTimeout(() => { if (syncStatusSpan) syncStatusSpan.textContent = ''; }, 7000);
         }
     });
