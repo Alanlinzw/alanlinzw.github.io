@@ -278,6 +278,7 @@ findOrCreateFile: async function() {
 // (保持你现有的这部分代码不变)
 // ========================================================================
 let allTasks = {};
+let isDataDirty = false;
 let currentTheme = 'light';
 let notificationsEnabled = true;
 let selectedLedgerMonth = 'current';
@@ -290,6 +291,8 @@ let annualReportYear = new Date().getFullYear();
 let currentPromptConfig = {};
 let activeKeydownHandler = null; 
 let currentSearchTerm = '';
+let autoSyncTimer = null; // 用于存储延迟同步的定时器ID
+const AUTO_SYNC_DELAY = 5000; // 延迟5秒 (5000毫秒)
 const faqs = [
     {
         question: "如何使用任务提醒功能？",
@@ -350,7 +353,21 @@ let statsBtn, statsModal, statsModalCloseBtn, faqBtn, faqModal, faqModalCloseBtn
 // 4. 核心功能函数定义
 // (保持你现有的这部分代码不变，直到 bindEventListeners)
 // ========================================================================
+function updateSyncIndicator() {
+    if (!syncDriveBtn || !syncStatusSpan) return;
 
+    if (isDataDirty) {
+        syncStatusSpan.textContent = '需要同步';
+        syncDriveBtn.classList.add('needs-sync'); // 可以用CSS给按钮加个发光或变色效果
+    } else {
+        // 只有当状态不是正在同步中时才清空
+        if (!syncDriveBtn.disabled) {
+            syncStatusSpan.textContent = '已同步'; // 或者显示最后同步时间
+             setTimeout(() => { if (syncStatusSpan.textContent === '已同步') syncStatusSpan.textContent = ''; }, 5000);
+        }
+        syncDriveBtn.classList.remove('needs-sync');
+    }
+}
 async function loadTasks(callback) {
     console.log("[PWA] Loading tasks from DB...");
     let data;
@@ -389,13 +406,45 @@ async function loadTasks(callback) {
 
 async function saveTasks() {
     allTasks.lastUpdatedLocal = Date.now();
+    isDataDirty = true; // 标记数据为“脏”
+    updateSyncIndicator(); // 更新UI提示
     try {
         await db.set('allTasks', allTasks);
-        // console.log('[PWA] Tasks saved to DB...');
+        triggerAutoSync();
     } catch (error) {
         console.error('[PWA] Error saving tasks to DB:', error);
     }
 }
+
+// 建议将此函数放在 saveTasks 函数附近
+function triggerAutoSync() {
+    // 1. 如果已有定时器在运行，先清除它
+    if (autoSyncTimer) {
+        clearTimeout(autoSyncTimer);
+    }
+
+    // 2. 检查同步按钮，如果正在手动同步中，则不启动自动同步
+    const syncButton = document.getElementById('sync-drive-btn');
+    if (syncButton && syncButton.disabled) {
+        console.log('Auto-sync deferred: Manual sync is in progress.');
+        return;
+    }
+
+    // 3. 启动一个新的定时器
+    console.log(`Auto-sync scheduled in ${AUTO_SYNC_DELAY / 1000} seconds.`);
+    if (syncStatusSpan) syncStatusSpan.textContent = '更改已保存，准备同步...';
+    
+    autoSyncTimer = setTimeout(() => {
+        console.log('Auto-sync timer fired. Initiating sync...');
+        if (syncButton && !syncButton.disabled) {
+            // 模拟点击同步按钮来执行完整的同步流程
+            syncButton.click();
+        }
+        // 清除定时器ID，表示本次任务已执行
+        autoSyncTimer = null;
+    }, AUTO_SYNC_DELAY);
+}
+
 
 function switchView(targetId) {
     document.querySelectorAll('.tab-item').forEach(item => {
@@ -406,6 +455,7 @@ function switchView(targetId) {
     });
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
+
 
 function openModal(modalElement) { if (modalElement) modalElement.classList.remove('hidden'); }
 function closeModal(modalElement) { if (modalElement) modalElement.classList.add('hidden'); }
@@ -2578,6 +2628,8 @@ function bindEventListeners() {
     if (featuresBtn) featuresBtn.addEventListener('click', showFeaturesModal);
     if (donateBtn) donateBtn.addEventListener('click', () => openModal(donateModal));
 
+
+
 const manualRefreshBtn = document.getElementById('manual-refresh-btn');
 if (manualRefreshBtn) {
     manualRefreshBtn.addEventListener('click', forceRefreshData);
@@ -2760,10 +2812,40 @@ if (manualRefreshBtn) {
         });
     }
     
-    // 【CORRECTED】
+
+// 建议添加到 bindEventListeners 函数中
+let syncTimeout = null;
+const triggerSync = () => {
+    // 使用防抖，避免短时间内（如快速切换窗口）重复触发
+    clearTimeout(syncTimeout);
+    syncTimeout = setTimeout(() => {
+        const syncButton = document.getElementById('sync-drive-btn');
+        if (syncButton && !syncButton.disabled) {
+            console.log('Visibility change or focus detected, triggering auto-sync.');
+            syncButton.click(); // 模拟点击同步按钮
+        }
+    }, 1000); // 延迟1秒触发
+};
+
+// 当页面变为可见时触发同步
+window.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        triggerSync();
+    }
+});
+
+// 当窗口获得焦点时也触发（作为补充）
+window.addEventListener('focus', triggerSync);
+
 // (在 bindEventListeners 函数内部)
 if (syncDriveBtn && syncStatusSpan) {
     syncDriveBtn.addEventListener('click', async () => {
+        // 【新增】在手动同步开始时，取消待处理的自动同步
+        if (autoSyncTimer) {
+            clearTimeout(autoSyncTimer);
+            autoSyncTimer = null;
+            console.log('Manual sync initiated, pending auto-sync cancelled.');
+        }
         console.log("同步按钮被点击。");
         syncStatusSpan.textContent = '初始化同步...';
         syncDriveBtn.disabled = true;
@@ -2897,6 +2979,8 @@ if (syncDriveBtn && syncStatusSpan) {
             allTasks = localData; // 确保上传的是最新的本地数据
             const uploadResult = await driveSync.upload(allTasks);
             syncStatusSpan.textContent = uploadResult.message;
+            isDataDirty = false; // 上传成功，数据干净了
+            updateSyncIndicator(); // 更新UI提示
         }
 
         // 如果这是首次同步（但云端为空），现在也标记为完成
@@ -2928,6 +3012,12 @@ if (syncDriveBtn && syncStatusSpan) {
             }
         } finally {
             syncDriveBtn.disabled = false;
+if (!error) { 
+    const now = new Date();
+    const timeString = now.toLocaleTimeString();
+    localStorage.setItem('lastSyncTime', timeString);
+    syncStatusSpan.textContent = `同步于 ${timeString}`;
+}
             console.log("Sync: 同步流程结束，按钮已重新启用。");
             setTimeout(() => { if (syncStatusSpan) syncStatusSpan.textContent = ''; }, 7000);
         }
