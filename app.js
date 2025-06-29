@@ -533,30 +533,39 @@ async function loadNotificationSetting() {
 }
 
 async function toggleNotificationSetting() { 
-    notificationsEnabled = !notificationsEnabled;
-    localStorage.setItem('notificationsEnabled', notificationsEnabled);
-    // await updateNotificationButtonUI(); // 更新UI移到权限请求之后，避免UI闪烁
+    // 关键：不要在这里立即改变 notificationsEnabled 的值。
+    // 让它保持当前的状态，根据这个状态来决定是【开启】还是【关闭】。
+    
+    // 我们将根据 notificationsEnabled 的【当前值】来决定做什么
+    const wantsToEnable = !notificationsEnabled; 
+    
+    // 更新 localStorage 是可以立即做的
+    localStorage.setItem('notificationsEnabled', wantsToEnable);
 
-    if (notificationsEnabled) {
+    if (wantsToEnable) { // 如果用户希望开启通知
         try {
+            // 请求权限的逻辑保持不变
             const permission = await Notification.requestPermission();
             if (permission !== 'granted') {
                 openCustomPrompt({title:"权限不足", message:'请在浏览器设置中允许本站的通知权限。', inputType:'none', hideCancelButton:true, confirmText:'好的'});
-                notificationsEnabled = false; // 修正状态
-                localStorage.setItem('notificationsEnabled', 'false'); // 保存修正后的状态
+                // 如果用户拒绝，我们什么都不做，让最终的 UI 更新来处理
+                localStorage.setItem('notificationsEnabled', 'false'); // 确保存储也同步
             } else {
-                await handleNotificationToggle(); // 权限获取成功后，尝试订阅
+                // 权限获取成功，调用 handleNotificationToggle 来处理【订阅】
+                // 注意：handleNotificationToggle 内部会自己根据新的状态来工作
             }
         } catch (error) {
             console.error("Error requesting notification permission:", error);
-            notificationsEnabled = false;
             localStorage.setItem('notificationsEnabled', 'false');
         }
-    } else {
-        // 如果用户禁用了通知，可能需要取消订阅 (如果应用逻辑需要)
-        // await unsubscribeUserFromPush(); 
-    }
-    await updateNotificationButtonUI(); // 最终更新UI状态
+    } 
+    // 不需要 else 分支了，因为 handleNotificationToggle 会处理取消订阅
+    
+    // 【核心修正】
+    // 在所有权限和初步状态设置完成后，
+    // 才真正更新全局变量，并调用总的处理器。
+    notificationsEnabled = wantsToEnable;
+    await handleNotificationToggle(); // 让这个函数来决定是订阅还是取消订阅
 }
 
 function getMonthlyDataForDisplay() {
