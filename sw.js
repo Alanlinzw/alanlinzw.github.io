@@ -3,10 +3,8 @@
 // ========================================================================
 function promisifyRequest(request) {
     return new Promise((resolve, reject) => {
-        // 对于 IDBRequest，onsuccess 和 onerror 是主要事件
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
-        // oncomplete 和 onabort 是 IDBTransaction 的事件，不直接用于 IDBRequest promise 封装
     });
 }
 
@@ -22,10 +20,10 @@ function createStore(dbName, storeName) {
     return (txMode, callback) => dbp.then((db) => {
         const transaction = db.transaction(storeName, txMode);
         const store = transaction.objectStore(storeName);
-        return callback(store, transaction); // 将事务也传递给回调，以便在回调中完成事务
+        return callback(store, transaction); 
     }).catch(err => {
         console.error("IndexedDB store operation failed:", err);
-        throw err; // 重新抛出错误，以便调用者可以捕获
+        throw err;
     });
 }
 
@@ -36,13 +34,12 @@ const db = {
         return dbStore('readonly', (store) => promisifyRequest(store.get(key)));
     },
     set(key, value) {
-        // 确保事务在 put 完成后才结束
         return dbStore('readwrite', (store, transaction) => {
             const req = store.put(value, key);
             return new Promise((resolve, reject) => {
                 req.onsuccess = () => resolve(req.result);
                 req.onerror = () => reject(req.error);
-                transaction.oncomplete = () => resolve(req.result); // 确保事务完成后再 resolve
+                transaction.oncomplete = () => resolve(req.result);
                 transaction.onerror = () => reject(transaction.error);
                 transaction.onabort = () => reject(transaction.error);
             });
@@ -53,7 +50,7 @@ const db = {
 // ========================================================================
 // 1. Service Worker 生命周期事件
 // ========================================================================
-const CACHE_NAME = 'todo-list-cache-v7'; // 【MODIFIED】缓存版本号更新
+const CACHE_NAME = 'todo-list-cache-v8'; // 【MODIFIED】缓存版本号更新
 // 应用外壳通常是相对路径
 const APP_SHELL_URLS = [
   '/', 
@@ -139,6 +136,11 @@ self.addEventListener('activate', event => {
             })
         )).then(() => {
             console.log('[SW] Old caches deleted, claiming clients.');
+            // 立即检查一次，以处理离线时到期的任务
+            checkAndShowNotifications();
+            
+            // 模拟定期检查（这仍然不是最完美的，但比单个 setTimeout 好）
+            setInterval(checkAndShowNotifications, 60 * 1000); // 例如每分钟检查一次
             return self.clients.claim(); // 确保新的 SW 立即控制所有打开的客户端
         })
     );
@@ -233,49 +235,28 @@ self.addEventListener('fetch', event => {
 
 
 // ========================================================================
-// 2. 监听来自主应用的消息来安排提醒
+// 2. 【核心修改】监听来自主应用的消息
 // ========================================================================
 self.addEventListener('message', event => {
-    if (event.data && event.data.type === 'SCHEDULE_REMINDER') {
-        const { task } = event.data.payload;
-        if (!task || !task.reminderTime || !task.id) {
-            console.error('[SW] Invalid task data for reminder:', task);
-            return;
-        }
-        console.log('[SW] Received SCHEDULE_REMINDER for task:', task.id, new Date(task.reminderTime));
-        const delay = new Date(task.reminderTime).getTime() - Date.now();
-        if (delay > 0) {
-            console.log(`[SW] Scheduling notification check in ${delay}ms for task ${task.id}`);
-            // 注意: setTimeout 在 Service Worker 中可能因 SW 休眠而不可靠。
-            // 真实生产环境应结合 Push API 或 Periodic Background Sync API。
-            // 此处为简化，依赖于 SW 在需要时被激活（例如通过 fetch, push, sync 事件）。
-            // 或者客户端在应用启动时触发检查。
-            setTimeout(() => {
-                console.log(`[SW] Timeout reached for task ${task.id}. Checking notifications.`);
-                checkAndShowNotifications();
-            }, delay);
-        } else if (task.reminderTime && task.reminderTime <= Date.now()) {
-            // 如果任务已经是过去的，立即检查（可能是在应用启动时补发）
-            console.log('[SW] Task reminder time is in the past, checking notifications now for task:', task.id);
-            checkAndShowNotifications();
-        }
-    } else if (event.data && event.data.action === 'skipWaiting') {
+    if (event.data && event.data.action === 'skipWaiting') {
         self.skipWaiting();
-    } else if (event.data && event.data.type === 'UPDATE_REMINDER') { // 【NEW】处理提醒更新
-        // 简单处理：当 SW 下次检查通知时，会使用更新后的任务信息。
-        // 更复杂的实现会取消旧的 setTimeout (如果用 task.id 作为 key 存储 timeoutId) 并设置新的。
-        console.log('[SW] Received UPDATE_REMINDER for task ID:', event.data.payload.task.id, '. Reminder will be based on updated data during next check.');
-    } else if (event.data && event.data.type === 'CANCEL_REMINDER') { // 【NEW】处理提醒取消
-        // 简单处理：如果任务从 allTasks.future 中被删除或其 reminderTime 被清除，
-        // checkAndShowNotifications 自然不会为它发送通知。
-        // 更复杂的实现会清除特定的 setTimeout。
-        console.log('[SW] Received CANCEL_REMINDER for task ID:', event.data.payload.taskId, '. Notification (if pending via setTimeout) may still fire unless task data is updated/removed.');
+    }
+    // 【NEW】监听所有与提醒相关的消息
+    else if (event.data && (
+        event.data.type === 'SCHEDULE_REMINDER' || 
+        event.data.type === 'UPDATE_REMINDER' || 
+        event.data.type === 'CANCEL_REMINDER'
+    )) {
+        console.log(`[SW] Received ${event.data.type}. The future tasks list has changed.`);
+        console.log('[SW] Triggering an immediate check for any due notifications.');
+        
+        // 无论是什么操作（新增、更新、删除），最可靠的应对方式就是立即完整地检查一遍。
+        checkAndShowNotifications();
     }
 });
 
-
 // ========================================================================
-// 3. 核心：本地通知检查与显示逻辑 (重构)
+// 3. 【核心新增】本地通知检查与显示逻辑
 // ========================================================================
 async function checkAndShowNotifications() {
     console.log('[SW] checkAndShowNotifications called.');
@@ -287,112 +268,91 @@ async function checkAndShowNotifications() {
             return;
         }
         
-        // 创建一个副本进行操作，以防直接修改从DB获取的对象可能引发的问题
+        // 创建一个副本进行操作，防止直接修改DB对象引发问题
         const allTasks = JSON.parse(JSON.stringify(allTasksData)); 
 
-        if (allTasks.future.length === 0) {
-            // console.log('[SW] No future tasks to check for notifications.');
-            return;
-        }
-        
         const now = Date.now();
         const dueTasks = [];
         const remainingFutureTasks = [];
-        let dbChangedByNotifications = false;
+        let dbChanged = false;
 
         allTasks.future.forEach(task => {
             // 只有当任务有 reminderTime 且已到期时才处理
             if (task.reminderTime && task.reminderTime <= now) {
                 dueTasks.push(task);
-                dbChangedByNotifications = true; // 标记有任务将被处理和移动
+                dbChanged = true; // 标记有任务将被处理和移动
             } else {
                 remainingFutureTasks.push(task);
             }
         });
         
         if (dueTasks.length > 0) {
-            console.log(`[SW] Found ${dueTasks.length} due tasks for notification.`);
+            console.log(`[SW] Found ${dueTasks.length} due tasks.`);
             allTasks.future = remainingFutureTasks; // 更新 future 列表，移除已到期的
 
             // 1. 显示通知
             for (const task of dueTasks) {
                 console.log(`[SW] Showing notification for: ${task.text}`);
-                // 确保有权限显示通知 (SW 通常在安装时请求或已获得)
-                if (self.registration && typeof self.registration.showNotification === 'function') {
-                    await self.registration.showNotification('高效待办清单提醒', { // 标题可以更具体
-                        body: task.text,
-                        icon: '/images/icons/icon-192x192.png', // PWA 图标
-                        badge: '/images/icons/icon-192x192.png', // Android 状态栏小图标
-                        tag: task.id, // 使用任务 ID作为标签，防止重复或用于更新
-                        renotify: true, // 如果已有相同 tag 的通知，是否重新通知用户
-                        data: { 
-                            url: self.registration.scope + '#future-section', // 【MODIFIED】点击通知后打开到未来计划区域
-                            taskId: task.id 
-                        }
-                    });
-                } else {
-                    console.warn('[SW] Cannot show notification: self.registration.showNotification is not available.');
-                }
+                await self.registration.showNotification('高效待办清单提醒', {
+                    body: task.text,
+                    icon: '/images/icons/icon-192x192.png',
+                    badge: '/images/icons/icon-192x192.png',
+                    tag: task.id, // 使用任务ID作为标签，防止重复
+                    renotify: true, // 如果已有相同tag的通知，重新通知
+                    data: { 
+                        url: self.registration.scope + '#future-section', // 点击通知后打开到未来计划区域
+                        taskId: task.id 
+                    }
+                });
 
                 // 2. 将到期任务移动到每日清单
-                if (!Array.isArray(allTasks.daily)) {
-                    allTasks.daily = [];
-                }
-                // 检查是否已存在 (以防重复移动)
                 if (!allTasks.daily.some(d => d.originalFutureId === task.id)) {
                     allTasks.daily.unshift({
-                        id: `daily_${Date.now()}_${Math.random().toString(36).substr(2,5)}`, // 新每日任务ID
-                        text: `[计划] ${task.text}`, // 标记来源
+                        id: `daily_${Date.now()}_${Math.random().toString(36).substr(2,5)}`,
+                        text: `[计划] ${task.text}`,
                         completed: false,
-                        note: task.progressText || task.note || '', // 继承备注
+                        note: task.progressText || task.note || '',
                         links: task.links || [],
-                        originalFutureId: task.id // 记录原始未来任务ID
+                        originalFutureId: task.id
                     });
                 }
             }
             
-            // 3. 保存整个更新后的 allTasks 对象回 IndexedDB
-            allTasks.lastUpdatedLocal = Date.now(); // 更新时间戳
+            // 3. 将整个更新后的 allTasks 对象保存回 IndexedDB
+            allTasks.lastUpdatedLocal = Date.now();
             await db.set('allTasks', allTasks);
             console.log('[SW] Due tasks processed, moved to daily list, and DB updated.');
-
-        } else {
-             // console.log('[SW] No due notifications found at this time.');
         }
     } catch (error) {
-        console.error("[SW] Error checking/showing notifications:", error);
+        console.error("[SW] Error in checkAndShowNotifications:", error);
     }
 }
 
 
 // ========================================================================
-// 4. 通知点击事件处理
+// 4. 【核心改进】通知点击事件处理
 // ========================================================================
 self.addEventListener('notificationclick', event => {
     console.log('[SW] Notification click Received.', event.notification);
-    event.notification.close(); // 关闭通知
+    event.notification.close();
 
-    const notificationData = event.notification.data;
-    // 优先使用通知数据中指定的 URL，否则回退到 SW scope (通常是应用首页)
-    const urlToOpen = (notificationData && notificationData.url) ? notificationData.url : self.registration.scope;
+    const urlToOpen = event.notification.data.url || self.registration.scope;
 
     event.waitUntil(
         clients.matchAll({ type: 'window', includeUncontrolled: true }).then(clientList => {
-            // 检查是否已有该 URL 的窗口打开
+            // 检查是否已有该应用的窗口打开
             for (const client of clientList) {
-                // 如果一个窗口已经打开到应用的根作用域，则尝试导航到具体URL并聚焦
                 if (client.url.startsWith(self.registration.scope) && 'focus' in client) {
-                    console.log('[SW] Focusing existing client and navigating to:', urlToOpen);
-                    client.navigate(urlToOpen); // 【MODIFIED】确保导航到包含哈希的URL
+                    // 如果有，则导航到指定URL并聚焦
+                    client.navigate(urlToOpen);
                     return client.focus();
                 }
             }
             // 如果没有，则打开新窗口
             if (clients.openWindow) {
-                console.log('[SW] Opening new window for:', urlToOpen);
                 return clients.openWindow(urlToOpen);
             }
-        }).catch(err => console.error("[SW] Error handling notification click:", err))
+        })
     );
 });
 
