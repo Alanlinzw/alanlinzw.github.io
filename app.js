@@ -130,9 +130,9 @@ initClients: async function() {
         });
     });
 },
-
   // 【CORRECTED & ROBUST AUTHENTICATION】
 // (在 app.js 的 driveSync 对象中)
+
 authenticate: function() { // 【注意】这里不再需要 async，因为它返回一个 Promise
     console.log("driveSync.authenticate: Method invoked.");
     return new Promise((resolve, reject) => {
@@ -173,7 +173,7 @@ authenticate: function() { // 【注意】这里不再需要 async，因为它�
         driveSync.tokenClient.requestAccessToken(); 
     });
 },
-            
+  
 // 【CORRECTED】
 // (在 app.js 的 driveSync 对象中)
 findOrCreateFile: async function() {
@@ -213,7 +213,6 @@ findOrCreateFile: async function() {
         return driveSync.driveFileId;
     }
 },
-
     upload: async function(data) {
         console.log("driveSync.upload: Method invoked.");
         if (!driveSync.driveFileId) throw new Error("driveSync.upload: No Drive file ID.");
