@@ -104,7 +104,6 @@ initClients: async function() {
         driveSync.gapi.load('client', async () => {
             try {
                 await driveSync.gapi.client.init({
-                    apiKey: driveSync.API_KEY,
                     discoveryDocs: driveSync.DISCOVERY_DOCS,
                 });
                 console.log("driveSync.initClients: gapi.client.init 成功。");
