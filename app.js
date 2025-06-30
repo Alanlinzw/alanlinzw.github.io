@@ -131,9 +131,7 @@ initClients: async function() {
     });
 },
 
-  // 【CORRECTED & ROBUST AUTHENTICATION】
-// (在 app.js 的 driveSync 对象中)
-authenticate: function() { // 【注意】这里不再需要 async，因为它返回一个 Promise
+authenticate: function() { // 注意：这里不需要 async，因为它返回一个 Promise
     console.log("driveSync.authenticate: Method invoked.");
     return new Promise((resolve, reject) => {
         if (!driveSync.tokenClient) {
@@ -149,9 +147,7 @@ authenticate: function() { // 【注意】这里不再需要 async，因为它�
             
             if (resp.error !== undefined) {
                 console.error('driveSync.authenticate: Google Auth Error in callback:', resp);
-                // 如果是用户关闭弹窗，或者静默请求失败需要弹窗但被阻止，
-                // 这些错误通常意味着需要用户交互，但流程已中断。
-                // 我们可以统一返回一个清晰的错误信息。
+                // 统一返回一个清晰的错误信息
                 let errorMessage = `授权失败: ${resp.error}`;
                 if (resp.error === "popup_closed_by_user" || resp.error === "access_denied") {
                     errorMessage = "用户取消了授权。";
@@ -2856,49 +2852,37 @@ if (syncDriveBtn && syncStatusSpan) {
         syncStatusSpan.textContent = '初始化同步...';
         syncDriveBtn.disabled = true;
 
-        // 2. 定义成功标志位，这是关键
-        let syncSucceeded = false;
-
         try {
-            // ==========================================================
-            //  同步流程开始
-            // ==========================================================
-            
-            // 检查 API 客户端
+            // 确保 Google API 客户端已加载并初始化
             if (!driveSync.tokenClient) {
                 await loadGoogleApis();
                 if (!driveSync.tokenClient) throw new Error('Google API 客户端未能成功初始化。');
             }
 
-            // 授权
+            // 【新逻辑】检查当前是否有有效的令牌。
+            // gapi.client.getToken() 会返回令牌对象，如果不存在或已过期，某些情况下会是 null。
             const token = driveSync.gapi.client.getToken();
             if (token === null) {
+                // 如果没有令牌，说明是首次或登录已失效，需要完整的授权流程
                 syncStatusSpan.textContent = '需要授权...';
-                await driveSync.authenticate();
+                await driveSync.authenticate(); 
             }
 
-            // 查找文件 (包含401错误重试授权的逻辑)
-            syncStatusSpan.textContent = '查找云文件...';
-            try {
-                await driveSync.findOrCreateFile();
-            } catch (apiError) {
-                if (apiError && (apiError.status === 401 || (apiError.result && apiError.result.error && apiError.result.error.code === 401))) {
-                    syncStatusSpan.textContent = '令牌失效，重新授权...';
-                    driveSync.gapi.client.setToken(null);
-                    await driveSync.authenticate();
-                    await driveSync.findOrCreateFile();
-                } else {
-                    throw apiError;
-                }
-            }
-            if (!driveSync.driveFileId) throw new Error('未能找到或创建云端文件。');
 
-            // 下载云端数据
-            syncStatusSpan.textContent = '下载云数据...';
-            const cloudData = await driveSync.download();
+// ==========================================================
+            //  核心：带自动重试的 API 调用
+            // ==========================================================
+            // 我们将查找文件、下载、上传等操作封装起来，以便重试
             
-            // 获取本地数据
-            let localData = await db.get('allTasks');
+            const performSyncOperations = async () => {
+                syncStatusSpan.textContent = '查找云文件...';
+                await driveSync.findOrCreateFile();
+                if (!driveSync.driveFileId) throw new Error('未能找到或创建云端文件。');
+
+                syncStatusSpan.textContent = '下载云数据...';
+                const cloudData = await driveSync.download();
+                
+                let localData = await db.get('allTasks');
             if (!localData || typeof localData !== 'object') {
                 localData = { daily: [], monthly: [], future: [], ledger: [], history: {}, ledgerHistory: {}, budgets: {}, currencySymbol: '$', lastUpdatedLocal: 0 };
             }
@@ -2940,39 +2924,53 @@ if (syncDriveBtn && syncStatusSpan) {
                 // --- 场景：常规同步，或首次同步但云端无数据 ---
                 console.log("常规同步检测：执行基于时间戳的覆盖策略。");
 
-                if (cloudData && typeof cloudData === 'object' && cloudData.lastUpdatedLocal && 
-                    cloudData.lastUpdatedLocal > (localData.lastUpdatedLocal || 0)) {
-                    // 云端较新，覆盖本地
+                if (cloudData && cloudData.lastUpdatedLocal > (localData.lastUpdatedLocal || 0)) {
+                    // 云端较新
                     syncStatusSpan.textContent = '云端数据较新，正在同步...';
+                    await db.set('allTasks', cloudData);
                     allTasks = cloudData;
-                    await db.set('allTasks', allTasks);
                     renderAllLists();
-                    syncStatusSpan.textContent = '已从云端同步！';
                 } else {
-                    // 本地较新或与云端一致，上传本地
+                    // 本地较新或一致
                     syncStatusSpan.textContent = '上传本地数据...';
-                    allTasks = localData; 
-                    const uploadResult = await driveSync.upload(allTasks);
-                    syncStatusSpan.textContent = uploadResult.message;
+                    await driveSync.upload(localData);
                 }
+                syncStatusSpan.textContent = '同步完成！';
+            };
 
-                if (isFirstSyncCompleted !== true) {
-                    await db.set('isFirstSyncCompleted', true);
+            try {
+                // 第一次尝试执行同步操作
+                await performSyncOperations();
+            } catch (apiError) {
+                // 检查是否是令牌过期错误 (401)
+                if (apiError && (apiError.status === 401 || (apiError.result && apiError.result.error && apiError.result.error.code === 401))) {
+                    console.warn("API 调用失败，疑似令牌过期。正在尝试静默刷新令牌...");
+                    syncStatusSpan.textContent = '刷新授权中...';
+
+                    // 废弃旧令牌
+                    driveSync.gapi.client.setToken(null);
+                    
+                    // 再次调用 authenticate，它会尝试静默获取新令牌
+                    await driveSync.authenticate();
+                    
+                    console.log("令牌刷新成功，正在重试同步操作...");
+                    syncStatusSpan.textContent = '重试同步...';
+
+                    // 再次执行同步操作
+                    await performSyncOperations();
+                } else {
+                    // 如果是其他类型的错误，则直接抛出
+                    throw apiError;
                 }
             }
-
             // ==========================================================
-            //  ↑↑↑ 核心比较与合并逻辑结束 ↑↑↑
+            //  重试逻辑结束
             // ==========================================================
             
-            // 3. 如果代码执行到这里没有出错，说明同步成功
-            syncSucceeded = true;
-
-            // 4. 更新UI状态
-            isDataDirty = false; // 数据不再是“脏”的
+            isDataDirty = false;
             updateSyncIndicator();
 
-        } catch (error) { // 捕获上面 try 块中发生的任何错误
+        } catch (error) {
             
             // 错误处理逻辑 (这里可以安全访问 error 变量)
             console.error("同步操作失败:", error);
@@ -3616,13 +3614,31 @@ if (!statsModal) {
     await loadNotificationSetting(); // loadNotificationSetting 内部会调用 updateNotificationButtonUI
     console.log("initializeApp: 主题和通知设置已加载。");
 
-    // 4. 加载 Google API (这会在内部初始化 driveSync.tokenClient)
     try {
         console.log("initializeApp: 尝试加载 Google API...");
-        await loadGoogleApis(); // 等待 Google API 加载和 driveSync.tokenClient 初始化
-        console.log("initializeApp: Google API 已加载且 driveSync 客户端已初始化。");
+        await loadGoogleApis();
+        console.log("initializeApp: Google API 已加载。");
+        
+        // 【新逻辑】应用启动时，尝试一次静默登录检查
+        // 这可以让用户在打开应用时，如果可能的话，就自动恢复登录状态
+        // 关键点：我们只调用 authenticate，不指定 prompt，让它静默执行
+        try {
+            // 设置一个短暂的回调超时，如果长时间没反应（说明需要弹窗），就放弃
+            const silentAuthPromise = driveSync.authenticate();
+            const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error("Silent auth timed out")), 3000));
+            
+            console.log("initializeApp: 尝试静默授权...");
+            await Promise.race([silentAuthPromise, timeoutPromise]);
+            console.log("initializeApp: 静默授权成功或已授权。");
+        } catch (silentError) {
+            // 这里捕获的错误可能是超时，或者需要用户交互
+            // 我们在这里什么都不做，是符合预期的。用户需要时会手动点击同步。
+            console.log("initializeApp: 静默授权未完成（可能需要用户交互），跳过。");
+            // 确保 GAPI 令牌状态被清理
+            driveSync.gapi.client.setToken(null);
+        }
     } catch (error) {
-        console.error("initializeApp: 启动时加载 Google API 或初始化 driveSync 客户端失败:", error);
+        console.error("initializeApp: 启动时加载 Google API 失败:", error);
         if (syncStatusSpan) syncStatusSpan.textContent = 'Google 服务加载失败。';
     }
 
