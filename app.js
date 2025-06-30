@@ -470,38 +470,42 @@ function addTask(inputElement, taskArrayRefName, onCompleteCallback, options = {
     if (!taskText) return;
 
     let newTask = {};
-    const taskArray = allTasks[taskArrayRefName] || []; // 确保 taskArrayRefName 对应的数组存在
+    const taskArray = allTasks[taskArrayRefName] || [];
 
- if (type === 'future') {
+    if (type === 'future') {
         const taskDateTimeValue = dateElement ? dateElement.value : '';
         newTask = { id: generateUniqueId(), text: taskText, completed: false, links: [] };
+        
         if (taskDateTimeValue) {
             const reminderDate = new Date(taskDateTimeValue);
             const reminderTimestamp = reminderDate.getTime();
+
+            // 检查时间是否有效且在未来
             if (!isNaN(reminderTimestamp) && reminderTimestamp > Date.now()) {
                 newTask.reminderTime = reminderTimestamp;
                 
-                // 【核心修正】增加健壮的提醒调度逻辑
+                // ==================== 【核心修改】 ====================
+                //  不再使用 setTimeout!
+                //  改为向 Service Worker 发送消息
+                // ====================================================
                 if (notificationsEnabled && 'serviceWorker' in navigator) {
-                    // 使用 navigator.serviceWorker.ready 来确保 SW 已激活
                     navigator.serviceWorker.ready.then(registration => {
                         if (registration.active) {
-                            registration.active.postMessage({ type: 'SCHEDULE_REMINDER', payload: { task: newTask } });
-                            console.log(`[PWA App] SCHEDULE_REMINDER for task ID ${newTask.id} sent to active Service Worker.`);
+                            registration.active.postMessage({ 
+                                type: 'SCHEDULE_REMINDER' 
+                                // 我们不需要发送任务本身，因为SW会从DB读取
+                            });
+                            console.log(`[App] 已向 Service Worker 发送 SCHEDULE_REMINDER 消息，任务: ${newTask.text}`);
                         } else {
-                             console.warn(`[PWA App] Reminder for task ID ${newTask.id} NOT sent: Service Worker is ready but has no active worker.`);
+                             console.warn(`[App] 无法发送提醒：Service Worker 已就绪但未激活。`);
                         }
                     }).catch(error => {
-                        console.error(`[PWA App] Error waiting for Service Worker to be ready for task ${newTask.id}:`, error);
+                        console.error(`[App] 获取 Service Worker registration 时出错:`, error);
                     });
-                } else if (notificationsEnabled) {
-                     console.warn(`[PWA App] Reminder for task ID ${newTask.id} NOT sent: Service Worker API not available or notificationsEnabled is false.`);
                 }
             } else { 
-                newTask.date = taskDateTimeValue.split('T')[0]; // 存储 YYYY-MM-DD 格式的日期
-                if(taskDateTimeValue && (isNaN(reminderTimestamp) || reminderTimestamp <= Date.now())) {
-                    console.warn(`[PWA App] Future task "${taskText}" date/time (${taskDateTimeValue}) is invalid or in the past. Storing date only: ${newTask.date}`);
-                }
+                // 如果时间无效或已过去，只存储日期部分
+                newTask.date = taskDateTimeValue.split('T')[0]; 
             }
         }
     } else if (type === 'daily') {
@@ -1902,12 +1906,15 @@ function createTaskActions(task, type, index, isHistoryView) {
         e.stopPropagation();
         if (index < 0) { console.warn("删除按钮的索引无效", type, index); return; }
 
-        // 如果删除的是一个设置了提醒的未来任务，通知 SW 取消提醒
-        if (type === 'future' && task.id && task.reminderTime && 
-            'serviceWorker' in navigator && navigator.serviceWorker.controller) {
-            console.log(`[PWA App] Sending CANCEL_REMINDER for future task ID ${task.id} to Service Worker.`);
-            navigator.serviceWorker.controller.postMessage({ type: 'CANCEL_REMINDER', payload: { taskId: task.id } });
-        }
+    // 【新增逻辑】如果删除的是一个有提醒的未来任务，通知SW
+    if (type === 'future' && task.id && task.reminderTime && 'serviceWorker' in navigator) {
+        navigator.serviceWorker.ready.then(registration => {
+            if (registration.active) {
+                registration.active.postMessage({ type: 'CANCEL_REMINDER' });
+                console.log(`[App] 已向 SW 发送 CANCEL_REMINDER 消息，任务 ID ${task.id}`);
+            }
+        });
+    }
         
         const currentTaskArray = allTasks[type];
         if (currentTaskArray && currentTaskArray[index]) { 
