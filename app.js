@@ -353,6 +353,51 @@ let statsBtn, statsModal, statsModalCloseBtn, faqBtn, faqModal, faqModalCloseBtn
 // 4. 核心功能函数定义
 // (保持你现有的这部分代码不变，直到 bindEventListeners)
 // ========================================================================
+async function loadGoogleApis() {
+    return new Promise((resolve, reject) => {
+        const checkInterval = setInterval(() => {
+            // 检查 GAPI 和新的 GIS 库是否都已加载
+            if (window.gapi && window.google && window.google.accounts && window.google.accounts.oauth2) {
+                clearInterval(checkInterval);
+                console.log("loadGoogleApis: GAPI 和 GIS 库已加载。");
+                
+                // 统一将 gapi 和 gis 实例设置到 driveSync 模块上
+                driveSync.gapi = window.gapi;
+                driveSync.gis = window.google.accounts.oauth2; // 使用 'gis' 作为统一的属性名
+                
+                // 现在可以安全地初始化 driveSync 的内部客户端了
+                driveSync.initClients()
+                    .then(() => {
+                        console.log("loadGoogleApis: driveSync 客户端初始化成功。");
+                        resolve(); // 表示API已完全准备好
+                    })
+                    .catch(error => {
+                        console.error("loadGoogleApis: 初始化 driveSync 客户端失败:", error);
+                        if (typeof syncStatusSpan !== 'undefined' && syncStatusSpan) {
+                             syncStatusSpan.textContent = 'Google服务初始化失败。';
+                        }
+                        reject(error);
+                    });
+            }
+        }, 200);
+
+        // 设置一个超时，以防脚本永远不加载
+        setTimeout(() => {
+            // 检查 driveSync 模块内的引用是否已设置
+            if (!driveSync.gapi || !driveSync.gis) { 
+                clearInterval(checkInterval);
+                const errorMsg = "loadGoogleApis: 加载 Google API 脚本超时。";
+                console.error(errorMsg);
+                if (typeof syncStatusSpan !== 'undefined' && syncStatusSpan) {
+                     syncStatusSpan.textContent = '加载Google服务超时。';
+                }
+                reject(new Error(errorMsg));
+            }
+        }, 15000); // 15秒超时
+    });
+}
+
+
 function updateSyncIndicator() {
     if (!syncDriveBtn || !syncStatusSpan) return;
 
@@ -3052,49 +3097,6 @@ async function initializeApp() {
 
 
 
-async function loadGoogleApis() {
-    return new Promise((resolve, reject) => {
-        const checkInterval = setInterval(() => {
-            // 检查 GAPI 和新的 GIS 库是否都已加载
-            if (window.gapi && window.google && window.google.accounts && window.google.accounts.oauth2) {
-                clearInterval(checkInterval);
-                console.log("loadGoogleApis: GAPI 和 GIS 库已加载。");
-                
-                // 统一将 gapi 和 gis 实例设置到 driveSync 模块上
-                driveSync.gapi = window.gapi;
-                driveSync.gis = window.google.accounts.oauth2; // 使用 'gis' 作为统一的属性名
-                
-                // 现在可以安全地初始化 driveSync 的内部客户端了
-                driveSync.initClients()
-                    .then(() => {
-                        console.log("loadGoogleApis: driveSync 客户端初始化成功。");
-                        resolve(); // 表示API已完全准备好
-                    })
-                    .catch(error => {
-                        console.error("loadGoogleApis: 初始化 driveSync 客户端失败:", error);
-                        if (typeof syncStatusSpan !== 'undefined' && syncStatusSpan) {
-                             syncStatusSpan.textContent = 'Google服务初始化失败。';
-                        }
-                        reject(error);
-                    });
-            }
-        }, 200);
-
-        // 设置一个超时，以防脚本永远不加载
-        setTimeout(() => {
-            // 检查 driveSync 模块内的引用是否已设置
-            if (!driveSync.gapi || !driveSync.gis) { 
-                clearInterval(checkInterval);
-                const errorMsg = "loadGoogleApis: 加载 Google API 脚本超时。";
-                console.error(errorMsg);
-                if (typeof syncStatusSpan !== 'undefined' && syncStatusSpan) {
-                     syncStatusSpan.textContent = '加载Google服务超时。';
-                }
-                reject(new Error(errorMsg));
-            }
-        }, 15000); // 15秒超时
-    });
-}
 
 // 当点击统计按钮时，app.js 可以先确保数据已传递
 // (在 app.js 的 bindEventListeners 中)
