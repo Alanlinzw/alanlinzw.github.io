@@ -2407,73 +2407,59 @@ async function unsubscribeUserFromPush() {
     }
 }
 
-// 【CORRECTED & ROBUST - FINAL VERSION】
 async function subscribeUserToPush() {
-    // 1. 检查 Service Worker API 是否可用
+    // 1. 首先进行功能检测
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-        console.warn("Push messaging is not supported by this browser.");
+        console.warn("此浏览器不支持推送消息。");
         openCustomPrompt({title:"功能不支持", message:'您的浏览器不支持推送通知功能。', inputType:'none', hideCancelButton:true, confirmText:'好的'});
         return null;
     }
     
     try {
-        // 2. 等待 Service Worker 确保处于激活状态
-        console.log('Waiting for Service Worker to be active...');
         const registration = await navigator.serviceWorker.ready;
-        console.log('Service Worker is active and ready.');
-
-        // 3. 检查是否已有订阅
         const existingSubscription = await registration.pushManager.getSubscription();
+
         if (existingSubscription) {
-            console.log('User is already subscribed:', existingSubscription);
-            // 【核心修正】在存储前，将 PushSubscription 转换为 JSON
-            const subscriptionJSON = existingSubscription.toJSON();
-            await db.set('pushSubscription', subscriptionJSON);
+            console.log('用户已经订阅:', existingSubscription);
+            await db.set('pushSubscription', existingSubscription.toJSON());
             return existingSubscription;
         }
 
-        // 4. 如果没有，则创建新订阅
-        console.log('No existing subscription, attempting to create a new one...');
         const vapidPublicKey = 'BOPBv2iLpTziiOOTjw8h2cT24-R_5c0s_q2ITf0JOTooBKiJBDl3bBROi4e_d_2dJd_quNBs2LrqEa2K_u_XGgY';
-        if (!vapidPublicKey) {
-            console.error("VAPID public key is missing.");
-            openCustomPrompt({title:"配置错误", message:'推送通知配置不完整，无法订阅。', inputType:'none', hideCancelButton:true, confirmText:'好的'});
-            return null;
-        }
-        
         const subscription = await registration.pushManager.subscribe({
-            userVisibleOnly: true, // 必须为 true，表示每次推送都会有用户可见的通知
+            userVisibleOnly: true,
             applicationServerKey: urlBase64ToUint8Array(vapidPublicKey)
         });
         
-        console.log('New subscription successful:', subscription);
-        
-        // 【核心修正】在存储前，将新的 PushSubscription 转换为 JSON
-        const subscriptionJSON = subscription.toJSON();
-        await db.set('pushSubscription', subscriptionJSON);
-        
-        // (可选) 在这里，您可以将 `subscription` 对象发送到您的后端服务器保存
-        // await sendSubscriptionToServer(subscription);
-        
+        console.log('新的订阅成功:', subscription);
+        await db.set('pushSubscription', subscription.toJSON());
+        // (可选) 在此将订阅信息发送到您的后端服务器
         return subscription;
 
     } catch (error) {
-        console.error('Failed to subscribe the user: ', error);
-        
-        // 确保在任何失败情况下，DB中的订阅信息都被清除
-        await db.set('pushSubscription', null);
+        console.error('用户订阅失败: ', error);
+        await db.set('pushSubscription', null); // 确保失败时清除本地记录
 
+        // ================== 【核心改进：智能错误提示】 ==================
         let title = "订阅失败";
-        let message = `无法订阅推送通知，发生未知错误: ${error.name}.`;
+        let message = `无法订阅推送通知，发生错误: ${error.name}.`;
+
+        // 检测是否在 iOS 环境
+        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
 
         if (error.name === 'NotAllowedError') {
-            title = "权限问题";
-            message = '浏览器已阻止通知权限。请在浏览器设置中为本站开启通知权限，然后重试。';
+            title = "权限被拒绝";
+            message = '您阻止了通知权限。请在浏览器的设置中为本站开启通知权限，然后重试。';
+        } else if (isIOS) {
+            title = "iOS 订阅提示";
+            message = "在 iPhone/iPad 上，您需要先将本应用【添加到主屏幕】，然后从主屏幕打开它，才能成功开启通知功能。请确保您的系统版本为 iOS 16.4 或更高。";
         } else if (error.name === 'InvalidStateError') {
              message = '无法创建订阅，可能是由于浏览器处于隐私模式或 Service Worker 未完全激活。请刷新页面后重试。';
         }
         
         openCustomPrompt({title: title, message: message, inputType:'none', hideCancelButton:true, confirmText:'好的'});
+        // =============================================================
+        
         return null;
     }
 }
