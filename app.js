@@ -131,7 +131,9 @@ initClients: async function() {
     });
 },
 
-authenticate: function() { // 注意：这里不需要 async，因为它返回一个 Promise
+  // 【CORRECTED & ROBUST AUTHENTICATION】
+// (在 app.js 的 driveSync 对象中)
+authenticate: function() { // 【注意】这里不再需要 async，因为它返回一个 Promise
     console.log("driveSync.authenticate: Method invoked.");
     return new Promise((resolve, reject) => {
         if (!driveSync.tokenClient) {
@@ -147,7 +149,9 @@ authenticate: function() { // 注意：这里不需要 async，因为它返回�
             
             if (resp.error !== undefined) {
                 console.error('driveSync.authenticate: Google Auth Error in callback:', resp);
-                // 统一返回一个清晰的错误信息
+                // 如果是用户关闭弹窗，或者静默请求失败需要弹窗但被阻止，
+                // 这些错误通常意味着需要用户交互，但流程已中断。
+                // 我们可以统一返回一个清晰的错误信息。
                 let errorMessage = `授权失败: ${resp.error}`;
                 if (resp.error === "popup_closed_by_user" || resp.error === "access_denied") {
                     errorMessage = "用户取消了授权。";
@@ -349,50 +353,6 @@ let statsBtn, statsModal, statsModalCloseBtn, faqBtn, faqModal, faqModalCloseBtn
 // 4. 核心功能函数定义
 // (保持你现有的这部分代码不变，直到 bindEventListeners)
 // ========================================================================
-async function loadGoogleApis() {
-    return new Promise((resolve, reject) => {
-        const checkInterval = setInterval(() => {
-            // 检查 GAPI 和新的 GIS 库是否都已加载
-            if (window.gapi && window.google && window.google.accounts && window.google.accounts.oauth2) {
-                clearInterval(checkInterval);
-                console.log("loadGoogleApis: GAPI 和 GIS 库已加载。");
-                
-                // 统一将 gapi 和 gis 实例设置到 driveSync 模块上
-                driveSync.gapi = window.gapi;
-                driveSync.gis = window.google.accounts.oauth2; // 使用 'gis' 作为统一的属性名
-                
-                // 现在可以安全地初始化 driveSync 的内部客户端了
-                driveSync.initClients()
-                    .then(() => {
-                        console.log("loadGoogleApis: driveSync 客户端初始化成功。");
-                        resolve(); // 表示API已完全准备好
-                    })
-                    .catch(error => {
-                        console.error("loadGoogleApis: 初始化 driveSync 客户端失败:", error);
-                        if (typeof syncStatusSpan !== 'undefined' && syncStatusSpan) {
-                             syncStatusSpan.textContent = 'Google服务初始化失败。';
-                        }
-                        reject(error);
-                    });
-            }
-        }, 200);
-
-        // 设置一个超时，以防脚本永远不加载
-        setTimeout(() => {
-            // 检查 driveSync 模块内的引用是否已设置
-            if (!driveSync.gapi || !driveSync.gis) { 
-                clearInterval(checkInterval);
-                const errorMsg = "loadGoogleApis: 加载 Google API 脚本超时。";
-                console.error(errorMsg);
-                if (typeof syncStatusSpan !== 'undefined' && syncStatusSpan) {
-                     syncStatusSpan.textContent = '加载Google服务超时。';
-                }
-                reject(new Error(errorMsg));
-            }
-        }, 15000); // 15秒超时
-    });
-}
-
 function updateSyncIndicator() {
     if (!syncDriveBtn || !syncStatusSpan) return;
 
@@ -510,42 +470,38 @@ function addTask(inputElement, taskArrayRefName, onCompleteCallback, options = {
     if (!taskText) return;
 
     let newTask = {};
-    const taskArray = allTasks[taskArrayRefName] || [];
+    const taskArray = allTasks[taskArrayRefName] || []; // 确保 taskArrayRefName 对应的数组存在
 
-    if (type === 'future') {
+ if (type === 'future') {
         const taskDateTimeValue = dateElement ? dateElement.value : '';
         newTask = { id: generateUniqueId(), text: taskText, completed: false, links: [] };
-        
         if (taskDateTimeValue) {
             const reminderDate = new Date(taskDateTimeValue);
             const reminderTimestamp = reminderDate.getTime();
-
-            // 检查时间是否有效且在未来
             if (!isNaN(reminderTimestamp) && reminderTimestamp > Date.now()) {
                 newTask.reminderTime = reminderTimestamp;
                 
-                // ==================== 【核心修改】 ====================
-                //  不再使用 setTimeout!
-                //  改为向 Service Worker 发送消息
-                // ====================================================
+                // 【核心修正】增加健壮的提醒调度逻辑
                 if (notificationsEnabled && 'serviceWorker' in navigator) {
+                    // 使用 navigator.serviceWorker.ready 来确保 SW 已激活
                     navigator.serviceWorker.ready.then(registration => {
                         if (registration.active) {
-                            registration.active.postMessage({ 
-                                type: 'SCHEDULE_REMINDER' 
-                                // 我们不需要发送任务本身，因为SW会从DB读取
-                            });
-                            console.log(`[App] 已向 Service Worker 发送 SCHEDULE_REMINDER 消息，任务: ${newTask.text}`);
+                            registration.active.postMessage({ type: 'SCHEDULE_REMINDER', payload: { task: newTask } });
+                            console.log(`[PWA App] SCHEDULE_REMINDER for task ID ${newTask.id} sent to active Service Worker.`);
                         } else {
-                             console.warn(`[App] 无法发送提醒：Service Worker 已就绪但未激活。`);
+                             console.warn(`[PWA App] Reminder for task ID ${newTask.id} NOT sent: Service Worker is ready but has no active worker.`);
                         }
                     }).catch(error => {
-                        console.error(`[App] 获取 Service Worker registration 时出错:`, error);
+                        console.error(`[PWA App] Error waiting for Service Worker to be ready for task ${newTask.id}:`, error);
                     });
+                } else if (notificationsEnabled) {
+                     console.warn(`[PWA App] Reminder for task ID ${newTask.id} NOT sent: Service Worker API not available or notificationsEnabled is false.`);
                 }
             } else { 
-                // 如果时间无效或已过去，只存储日期部分
-                newTask.date = taskDateTimeValue.split('T')[0]; 
+                newTask.date = taskDateTimeValue.split('T')[0]; // 存储 YYYY-MM-DD 格式的日期
+                if(taskDateTimeValue && (isNaN(reminderTimestamp) || reminderTimestamp <= Date.now())) {
+                    console.warn(`[PWA App] Future task "${taskText}" date/time (${taskDateTimeValue}) is invalid or in the past. Storing date only: ${newTask.date}`);
+                }
             }
         }
     } else if (type === 'daily') {
@@ -1946,15 +1902,12 @@ function createTaskActions(task, type, index, isHistoryView) {
         e.stopPropagation();
         if (index < 0) { console.warn("删除按钮的索引无效", type, index); return; }
 
-    // 【新增逻辑】如果删除的是一个有提醒的未来任务，通知SW
-    if (type === 'future' && task.id && task.reminderTime && 'serviceWorker' in navigator) {
-        navigator.serviceWorker.ready.then(registration => {
-            if (registration.active) {
-                registration.active.postMessage({ type: 'CANCEL_REMINDER' });
-                console.log(`[App] 已向 SW 发送 CANCEL_REMINDER 消息，任务 ID ${task.id}`);
-            }
-        });
-    }
+        // 如果删除的是一个设置了提醒的未来任务，通知 SW 取消提醒
+        if (type === 'future' && task.id && task.reminderTime && 
+            'serviceWorker' in navigator && navigator.serviceWorker.controller) {
+            console.log(`[PWA App] Sending CANCEL_REMINDER for future task ID ${task.id} to Service Worker.`);
+            navigator.serviceWorker.controller.postMessage({ type: 'CANCEL_REMINDER', payload: { taskId: task.id } });
+        }
         
         const currentTaskArray = allTasks[type];
         if (currentTaskArray && currentTaskArray[index]) { 
@@ -2447,59 +2400,73 @@ async function unsubscribeUserFromPush() {
     }
 }
 
+// 【CORRECTED & ROBUST - FINAL VERSION】
 async function subscribeUserToPush() {
-    // 1. 首先进行功能检测
+    // 1. 检查 Service Worker API 是否可用
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-        console.warn("此浏览器不支持推送消息。");
+        console.warn("Push messaging is not supported by this browser.");
         openCustomPrompt({title:"功能不支持", message:'您的浏览器不支持推送通知功能。', inputType:'none', hideCancelButton:true, confirmText:'好的'});
         return null;
     }
     
     try {
+        // 2. 等待 Service Worker 确保处于激活状态
+        console.log('Waiting for Service Worker to be active...');
         const registration = await navigator.serviceWorker.ready;
-        const existingSubscription = await registration.pushManager.getSubscription();
+        console.log('Service Worker is active and ready.');
 
+        // 3. 检查是否已有订阅
+        const existingSubscription = await registration.pushManager.getSubscription();
         if (existingSubscription) {
-            console.log('用户已经订阅:', existingSubscription);
-            await db.set('pushSubscription', existingSubscription.toJSON());
+            console.log('User is already subscribed:', existingSubscription);
+            // 【核心修正】在存储前，将 PushSubscription 转换为 JSON
+            const subscriptionJSON = existingSubscription.toJSON();
+            await db.set('pushSubscription', subscriptionJSON);
             return existingSubscription;
         }
 
+        // 4. 如果没有，则创建新订阅
+        console.log('No existing subscription, attempting to create a new one...');
         const vapidPublicKey = 'BOPBv2iLpTziiOOTjw8h2cT24-R_5c0s_q2ITf0JOTooBKiJBDl3bBROi4e_d_2dJd_quNBs2LrqEa2K_u_XGgY';
+        if (!vapidPublicKey) {
+            console.error("VAPID public key is missing.");
+            openCustomPrompt({title:"配置错误", message:'推送通知配置不完整，无法订阅。', inputType:'none', hideCancelButton:true, confirmText:'好的'});
+            return null;
+        }
+        
         const subscription = await registration.pushManager.subscribe({
-            userVisibleOnly: true,
+            userVisibleOnly: true, // 必须为 true，表示每次推送都会有用户可见的通知
             applicationServerKey: urlBase64ToUint8Array(vapidPublicKey)
         });
         
-        console.log('新的订阅成功:', subscription);
-        await db.set('pushSubscription', subscription.toJSON());
-        // (可选) 在此将订阅信息发送到您的后端服务器
+        console.log('New subscription successful:', subscription);
+        
+        // 【核心修正】在存储前，将新的 PushSubscription 转换为 JSON
+        const subscriptionJSON = subscription.toJSON();
+        await db.set('pushSubscription', subscriptionJSON);
+        
+        // (可选) 在这里，您可以将 `subscription` 对象发送到您的后端服务器保存
+        // await sendSubscriptionToServer(subscription);
+        
         return subscription;
 
     } catch (error) {
-        console.error('用户订阅失败: ', error);
-        await db.set('pushSubscription', null); // 确保失败时清除本地记录
+        console.error('Failed to subscribe the user: ', error);
+        
+        // 确保在任何失败情况下，DB中的订阅信息都被清除
+        await db.set('pushSubscription', null);
 
-        // ================== 【核心改进：智能错误提示】 ==================
         let title = "订阅失败";
-        let message = `无法订阅推送通知，发生错误: ${error.name}.`;
-
-        // 检测是否在 iOS 环境
-        const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+        let message = `无法订阅推送通知，发生未知错误: ${error.name}.`;
 
         if (error.name === 'NotAllowedError') {
-            title = "权限被拒绝";
-            message = '您阻止了通知权限。请在浏览器的设置中为本站开启通知权限，然后重试。';
-        } else if (isIOS) {
-            title = "iOS 订阅提示";
-            message = "在 iPhone/iPad 上，您需要先将本应用【添加到主屏幕】，然后从主屏幕打开它，才能成功开启通知功能。请确保您的系统版本为 iOS 16.4 或更高。";
+            title = "权限问题";
+            message = '浏览器已阻止通知权限。请在浏览器设置中为本站开启通知权限，然后重试。';
         } else if (error.name === 'InvalidStateError') {
              message = '无法创建订阅，可能是由于浏览器处于隐私模式或 Service Worker 未完全激活。请刷新页面后重试。';
         }
         
         openCustomPrompt({title: title, message: message, inputType:'none', hideCancelButton:true, confirmText:'好的'});
-        // =============================================================
-        
         return null;
     }
 }
@@ -2881,118 +2848,169 @@ window.addEventListener('visibilitychange', () => {
 // 当窗口获得焦点时也触发（作为补充）
 window.addEventListener('focus', triggerSync);
 
+// (在 bindEventListeners 函数内部)
+// (在 app.js 的 bindEventListeners 函数内部)
 if (syncDriveBtn && syncStatusSpan) {
     syncDriveBtn.addEventListener('click', async () => {
+        // 1. 如果有自动同步在等待，取消它，因为我们要手动同步了
         if (autoSyncTimer) {
             clearTimeout(autoSyncTimer);
             autoSyncTimer = null;
+            console.log('Manual sync initiated, pending auto-sync cancelled.');
         }
 
         console.log("同步按钮被点击。");
         syncStatusSpan.textContent = '初始化同步...';
         syncDriveBtn.disabled = true;
+
+        // 2. 定义成功标志位，这是关键
         let syncSucceeded = false;
 
         try {
-            // 确保 API 客户端已加载
+            // ==========================================================
+            //  同步流程开始
+            // ==========================================================
+            
+            // 检查 API 客户端
             if (!driveSync.tokenClient) {
                 await loadGoogleApis();
                 if (!driveSync.tokenClient) throw new Error('Google API 客户端未能成功初始化。');
             }
 
-            // 定义核心同步操作，以便重试
-            const performSyncOperations = async () => {
-                // ... (这部分内部逻辑和您原来的一样，包括 findOrCreateFile, download, 数据合并/覆盖等)
-                syncStatusSpan.textContent = '查找云文件...';
-                await driveSync.findOrCreateFile();
-                if (!driveSync.driveFileId) throw new Error('未能找到或创建云端文件。');
+            // 授权
+            const token = driveSync.gapi.client.getToken();
+            if (token === null) {
+                syncStatusSpan.textContent = '需要授权...';
+                await driveSync.authenticate();
+            }
 
-                syncStatusSpan.textContent = '下载云数据...';
-                const cloudData = await driveSync.download();
-                
-                let localData = await db.get('allTasks');
-                if (!localData || typeof localData !== 'object') {
-                    localData = { daily: [], monthly: [], future: [], ledger: [], history: {}, ledgerHistory: {}, budgets: {}, currencySymbol: '$', lastUpdatedLocal: 0 };
-                }
-                
-                const isFirstSyncCompleted = await db.get('isFirstSyncCompleted');
-                
-                if (isFirstSyncCompleted !== true && cloudData && Object.keys(cloudData).length > 0) {
-                    syncStatusSpan.textContent = '首次同步，合并数据...';
-                    const mergedData = { /* ... 您的合并逻辑 ... */ 
-                        daily: [...(cloudData.daily || []), ...(localData.daily || [])],
-                        monthly: [...(cloudData.monthly || []), ...(localData.monthly || [])],
-                        future: [...(cloudData.future || []), ...(localData.future || [])],
-                        ledger: [...(cloudData.ledger || []), ...(localData.ledger || [])],
-                        history: { ...(cloudData.history || {}), ...(localData.history || {}) },
-                        ledgerHistory: { ...(cloudData.ledgerHistory || {}), ...(localData.ledgerHistory || {}) },
-                        budgets: { ...(cloudData.budgets || {}), ...(localData.budgets || {}) },
-                        currencySymbol: localData.currencySymbol || cloudData.currencySymbol || '$',
-                        lastUpdatedLocal: Date.now()
-                    };
-                    allTasks = mergedData;
-                    await driveSync.upload(allTasks);
-                    await db.set('allTasks', allTasks);
-                    await db.set('isFirstSyncCompleted', true);
-                    renderAllLists();
-                    syncStatusSpan.textContent = '数据合并并同步成功！';
-                } else {
-                    if (cloudData && typeof cloudData === 'object' && cloudData.lastUpdatedLocal > (localData.lastUpdatedLocal || 0)) {
-                        syncStatusSpan.textContent = '云端数据较新，正在同步...';
-                        allTasks = cloudData;
-                        await db.set('allTasks', allTasks);
-                        renderAllLists();
-                        syncStatusSpan.textContent = '已从云端同步！';
-                    } else {
-                        syncStatusSpan.textContent = '上传本地数据...';
-                        allTasks = localData;
-                        const uploadResult = await driveSync.upload(allTasks);
-                        syncStatusSpan.textContent = uploadResult.message;
-                    }
-                    if (isFirstSyncCompleted !== true) {
-                        await db.set('isFirstSyncCompleted', true);
-                    }
-                }
-            };
-
-            // 【新的、更简洁的重试逻辑】
+            // 查找文件 (包含401错误重试授权的逻辑)
+            syncStatusSpan.textContent = '查找云文件...';
             try {
-                // 直接尝试执行。如果未授权，这里就会因为 API 调用失败而抛出 401 错误。
-                await performSyncOperations();
+                await driveSync.findOrCreateFile();
             } catch (apiError) {
-                // 只有在遇到 401 (未授权) 错误时才尝试重新授权
-                if (apiError && (apiError.status === 401 || (apiError.result && apiError.result.error.code === 401))) {
-                    console.warn("API 调用失败 (401)，需要授权。");
-                    syncStatusSpan.textContent = '需要授权...';
-                    
-                    // 调用 authenticate。它会智能地决定是弹窗还是静默刷新。
+                if (apiError && (apiError.status === 401 || (apiError.result && apiError.result.error && apiError.result.error.code === 401))) {
+                    syncStatusSpan.textContent = '令牌失效，重新授权...';
+                    driveSync.gapi.client.setToken(null);
                     await driveSync.authenticate();
-                    
-                    console.log("授权成功，正在重试同步操作...");
-                    syncStatusSpan.textContent = '重试同步...';
-                    await performSyncOperations(); // 再次执行核心操作
+                    await driveSync.findOrCreateFile();
                 } else {
-                    // 如果是其他网络错误或API错误，直接抛出
                     throw apiError;
                 }
             }
+            if (!driveSync.driveFileId) throw new Error('未能找到或创建云端文件。');
 
+            // 下载云端数据
+            syncStatusSpan.textContent = '下载云数据...';
+            const cloudData = await driveSync.download();
+            
+            // 获取本地数据
+            let localData = await db.get('allTasks');
+            if (!localData || typeof localData !== 'object') {
+                localData = { daily: [], monthly: [], future: [], ledger: [], history: {}, ledgerHistory: {}, budgets: {}, currencySymbol: '$', lastUpdatedLocal: 0 };
+            }
+            
+            // ==========================================================
+            //  ↓↓↓ 这里是之前被省略的核心比较与合并逻辑 ↓↓↓
+            // ==========================================================
+
+            const isFirstSyncCompleted = await db.get('isFirstSyncCompleted');
+
+            if (isFirstSyncCompleted !== true && cloudData && Object.keys(cloudData).length > 0) {
+                // --- 场景：首次同步，且云端有数据 ---
+                console.log("首次同步检测：执行数据合并策略。");
+                syncStatusSpan.textContent = '首次同步，正在合并数据...';
+
+                const mergedTasks = {
+                    daily: [...(cloudData.daily || []), ...(localData.daily || [])],
+                    monthly: [...(cloudData.monthly || []), ...(localData.monthly || [])],
+                    future: [...(cloudData.future || []), ...(localData.future || [])],
+                    ledger: [...(cloudData.ledger || []), ...(localData.ledger || [])],
+                    history: { ...cloudData.history, ...localData.history },
+                    ledgerHistory: { ...cloudData.ledgerHistory, ...localData.ledgerHistory },
+                    budgets: { ...cloudData.budgets, ...localData.budgets },
+                    currencySymbol: cloudData.currencySymbol || localData.currencySymbol || '$',
+                    lastUpdatedLocal: Date.now() 
+                };
+                
+                allTasks = mergedTasks;
+                
+                console.log("正在上传合并后的数据...");
+                await driveSync.upload(allTasks);
+                await db.set('allTasks', allTasks);
+                await db.set('isFirstSyncCompleted', true);
+                
+                syncStatusSpan.textContent = '数据合并并同步成功！';
+                renderAllLists();
+
+            } else {
+                // --- 场景：常规同步，或首次同步但云端无数据 ---
+                console.log("常规同步检测：执行基于时间戳的覆盖策略。");
+
+                if (cloudData && typeof cloudData === 'object' && cloudData.lastUpdatedLocal && 
+                    cloudData.lastUpdatedLocal > (localData.lastUpdatedLocal || 0)) {
+                    // 云端较新，覆盖本地
+                    syncStatusSpan.textContent = '云端数据较新，正在同步...';
+                    allTasks = cloudData;
+                    await db.set('allTasks', allTasks);
+                    renderAllLists();
+                    syncStatusSpan.textContent = '已从云端同步！';
+                } else {
+                    // 本地较新或与云端一致，上传本地
+                    syncStatusSpan.textContent = '上传本地数据...';
+                    allTasks = localData; 
+                    const uploadResult = await driveSync.upload(allTasks);
+                    syncStatusSpan.textContent = uploadResult.message;
+                }
+
+                if (isFirstSyncCompleted !== true) {
+                    await db.set('isFirstSyncCompleted', true);
+                }
+            }
+
+            // ==========================================================
+            //  ↑↑↑ 核心比较与合并逻辑结束 ↑↑↑
+            // ==========================================================
+            
+            // 3. 如果代码执行到这里没有出错，说明同步成功
             syncSucceeded = true;
-            isDataDirty = false;
+
+            // 4. 更新UI状态
+            isDataDirty = false; // 数据不再是“脏”的
             updateSyncIndicator();
 
-
-
         } catch (error) { // 捕获上面 try 块中发生的任何错误
-            console.error("同步操作最终失败:", error);
+            
+            // 错误处理逻辑 (这里可以安全访问 error 变量)
+            console.error("同步操作失败:", error);
             const errorMessage = error.message || '未知错误';
             syncStatusSpan.textContent = `同步错误: ${errorMessage.substring(0, 40)}...`;
-            // ... (您现有的 openCustomPrompt 错误提示逻辑)
-        } finally { // 无论成功或失败，都会执行这里
-            syncDriveBtn.disabled = false;
-            console.log("同步流程结束，按钮已重新启用。");
 
-            // 4. 使用 syncSucceeded 标志位来判断最终状态
+            if (errorMessage.includes("popup_closed_by_user") || errorMessage.includes("access_denied")) {
+                openCustomPrompt({
+                    title: "授权取消",
+                    message: "您取消了 Google Drive 授权。同步操作无法继续。",
+                    inputType: 'none',
+                    confirmText: '好的',
+                    hideCancelButton: true
+                });
+            } else {
+                 openCustomPrompt({
+                    title: "同步失败",
+                    message: `发生错误: ${errorMessage}`,
+                    inputType: 'none',
+                    confirmText: '好的',
+                    hideCancelButton: true
+                });
+            }
+
+        } finally { // 无论成功或失败，都会执行这里
+
+            // 5. 重新启用按钮
+            syncDriveBtn.disabled = false;
+            console.log("Sync: 同步流程结束，按钮已重新启用。");
+
+            // 6. 使用 syncSucceeded 标志位来判断
             if (syncSucceeded) {
                 const now = new Date();
                 const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -3004,7 +3022,7 @@ if (syncDriveBtn && syncStatusSpan) {
                 }
             }
 
-            // 5. 在一段时间后，清空状态提示（除非有未同步的更改）
+            // 7. 在一段时间后，清空状态提示（除非有未同步的更改）
             setTimeout(() => {
                 if (!isDataDirty && syncStatusSpan) {
                     syncStatusSpan.textContent = '';
@@ -3033,6 +3051,50 @@ async function initializeApp() {
 
 
 
+
+async function loadGoogleApis() {
+    return new Promise((resolve, reject) => {
+        const checkInterval = setInterval(() => {
+            // 检查 GAPI 和新的 GIS 库是否都已加载
+            if (window.gapi && window.google && window.google.accounts && window.google.accounts.oauth2) {
+                clearInterval(checkInterval);
+                console.log("loadGoogleApis: GAPI 和 GIS 库已加载。");
+                
+                // 统一将 gapi 和 gis 实例设置到 driveSync 模块上
+                driveSync.gapi = window.gapi;
+                driveSync.gis = window.google.accounts.oauth2; // 使用 'gis' 作为统一的属性名
+                
+                // 现在可以安全地初始化 driveSync 的内部客户端了
+                driveSync.initClients()
+                    .then(() => {
+                        console.log("loadGoogleApis: driveSync 客户端初始化成功。");
+                        resolve(); // 表示API已完全准备好
+                    })
+                    .catch(error => {
+                        console.error("loadGoogleApis: 初始化 driveSync 客户端失败:", error);
+                        if (typeof syncStatusSpan !== 'undefined' && syncStatusSpan) {
+                             syncStatusSpan.textContent = 'Google服务初始化失败。';
+                        }
+                        reject(error);
+                    });
+            }
+        }, 200);
+
+        // 设置一个超时，以防脚本永远不加载
+        setTimeout(() => {
+            // 检查 driveSync 模块内的引用是否已设置
+            if (!driveSync.gapi || !driveSync.gis) { 
+                clearInterval(checkInterval);
+                const errorMsg = "loadGoogleApis: 加载 Google API 脚本超时。";
+                console.error(errorMsg);
+                if (typeof syncStatusSpan !== 'undefined' && syncStatusSpan) {
+                     syncStatusSpan.textContent = '加载Google服务超时。';
+                }
+                reject(new Error(errorMsg));
+            }
+        }, 15000); // 15秒超时
+    });
+}
 
 // 当点击统计按钮时，app.js 可以先确保数据已传递
 // (在 app.js 的 bindEventListeners 中)
@@ -3561,14 +3623,16 @@ if (!statsModal) {
     await loadNotificationSetting(); // loadNotificationSetting 内部会调用 updateNotificationButtonUI
     console.log("initializeApp: 主题和通知设置已加载。");
 
+    // 4. 加载 Google API (这会在内部初始化 driveSync.tokenClient)
     try {
         console.log("initializeApp: 尝试加载 Google API...");
-        await loadGoogleApis();
-        console.log("initializeApp: Google API 已加载。");
+        await loadGoogleApis(); // 等待 Google API 加载和 driveSync.tokenClient 初始化
+        console.log("initializeApp: Google API 已加载且 driveSync 客户端已初始化。");
     } catch (error) {
-        console.error("initializeApp: 启动时加载 Google API 失败:", error);
+        console.error("initializeApp: 启动时加载 Google API 或初始化 driveSync 客户端失败:", error);
         if (syncStatusSpan) syncStatusSpan.textContent = 'Google 服务加载失败。';
     }
+
 
 
 // 5. 加载数据并检查过期任务
