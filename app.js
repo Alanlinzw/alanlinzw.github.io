@@ -909,6 +909,12 @@ function renderDailyTasks(tasksToRender) {
         fragment.appendChild(li);
     });
     dailyTaskList.appendChild(fragment);
+    handleCompletionCelebration(
+        'daily',
+        allTasks.daily, // 检查的是完整的每日任务列表
+        dailyTaskList,
+        '太棒了，您完成了今日的所有任务！'
+    );
 }
 
 function renderMonthlyTasks(dataToRender, isHistoryView) {
@@ -991,6 +997,19 @@ function renderMonthlyTasks(dataToRender, isHistoryView) {
             }
         });
         document.body.dataset.sortModeExitListenerAttached = 'true';
+    }
+}
+ if (!isHistoryView) {
+        const currentMonthlyData = getMonthlyDataForDisplay(); // 获取当前月份的完整数据
+        handleCompletionCelebration(
+            'monthly',
+            currentMonthlyData, // 检查的是当前月份的完整任务列表
+            monthlyTaskList,
+            '太棒了，您完成了本月的所有任务！'
+        );
+    } else {
+        // 如果是历史视图，确保移除可能存在的祝贺信息
+        handleCompletionCelebration('monthly', [], monthlyTaskList, '');
     }
 }
 
@@ -2083,6 +2102,43 @@ function formatReminderDateTime(timestamp) {
     }
 }
 function createDragHandle() { const handle = document.createElement('div'); handle.className = 'drag-handle'; handle.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M2 11h12v2H2zm0-5h12v2H2zm0-5h12v2H2z"/></svg>`; handle.title = '拖拽排序'; return handle; }
+function handleCompletionCelebration(listType, taskArray, listElement, message) {
+    if (!listElement) return;
+
+    const section = listElement.closest('.section');
+    if (!section) return;
+
+    // 先移除任何已存在的庆祝信息，以防重复
+    const existingCelebration = section.querySelector('.completion-celebration');
+    if (existingCelebration) {
+        existingCelebration.remove();
+    }
+
+    // 检查条件：列表不为空，且所有任务都已完成
+    if (taskArray && taskArray.length > 0 && taskArray.every(task => task.completed)) {
+        const celebrationDiv = document.createElement('div');
+        celebrationDiv.className = 'completion-celebration';
+        
+        const icon = document.createElement('img');
+        icon.src = 'images/icon-celebrate.svg';
+        icon.alt = '庆祝';
+        
+        const textSpan = document.createElement('span');
+        textSpan.textContent = message;
+        
+        celebrationDiv.appendChild(icon);
+        celebrationDiv.appendChild(textSpan);
+        
+        // 将祝贺信息插入到标题行下方
+        const header = section.querySelector('.section-header');
+        if (header && header.nextSibling) {
+            header.parentNode.insertBefore(celebrationDiv, header.nextSibling);
+        } else {
+            // 如果找不到下一个兄弟元素，就添加到 section 的开头（备用方案）
+            section.prepend(celebrationDiv);
+        }
+    }
+}
 function openHistoryModal(type) { 
     historyModalFor = type; 
     historyDisplayYear = new Date().getFullYear(); 
