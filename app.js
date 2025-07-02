@@ -997,8 +997,7 @@ function renderMonthlyTasks(dataToRender, isHistoryView) {
             }
         });
         document.body.dataset.sortModeExitListenerAttached = 'true';
-    }
-}
+
  if (!isHistoryView) {
         const currentMonthlyData = getMonthlyDataForDisplay(); // 获取当前月份的完整数据
         handleCompletionCelebration(
