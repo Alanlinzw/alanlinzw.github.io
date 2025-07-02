@@ -997,8 +997,11 @@ function renderMonthlyTasks(dataToRender, isHistoryView) {
             }
         });
         document.body.dataset.sortModeExitListenerAttached = 'true';
+    }
 
- if (!isHistoryView) {
+    // --- 6. 【新增】处理祝贺信息 ---
+    // 注意：只在非历史视图下显示祝贺信息
+    if (!isHistoryView) {
         const currentMonthlyData = getMonthlyDataForDisplay(); // 获取当前月份的完整数据
         handleCompletionCelebration(
             'monthly',
