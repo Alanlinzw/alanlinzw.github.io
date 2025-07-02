@@ -88,6 +88,7 @@ const APP_SHELL_URLS = [
   '/images/icon-currency.svg',
   '/images/icon-link.svg',
   '/images/icon-add-link.svg',
+  '/images/icon-celebrate.svg',
 ];
 // 第三方库 CDN URL
 const VENDOR_URLS = [
