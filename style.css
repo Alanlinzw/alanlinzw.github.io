@@ -1076,3 +1076,56 @@ body { padding-bottom: 80px; }
 [data-theme="dark"] .reminder-datetime-text {
     color: var(--light-text-color);
 }
+/* ==========================================================================
+   26. COMPLETION CELEBRATION STYLES (NEW)
+   ========================================================================== */
+.completion-celebration {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-sm);
+    margin: var(--spacing-sm) auto var(--spacing-lg);
+    padding: var(--spacing-sm) var(--spacing-lg);
+    background-color: color-mix(in srgb, var(--accent-teal) 15%, transparent);
+    color: var(--accent-teal-hover);
+    border: 1px solid color-mix(in srgb, var(--accent-teal) 30%, transparent);
+    border-radius: var(--border-radius-pill);
+    font-weight: 600;
+    font-size: 14px;
+    animation: fadeInScaleUp 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+    transform-origin: center;
+    box-shadow: var(--shadow-sm);
+}
+
+.completion-celebration img {
+    width: 24px;
+    height: 24px;
+    /* 动画效果 */
+    animation: tada 1.5s ease-in-out infinite;
+    animation-delay: 0.5s;
+}
+
+[data-theme="dark"] .completion-celebration {
+    background-color: color-mix(in srgb, var(--accent-teal) 20%, transparent);
+    color: var(--accent-teal);
+    border-color: color-mix(in srgb, var(--accent-teal) 40%, transparent);
+}
+
+@keyframes fadeInScaleUp {
+    from {
+        opacity: 0;
+        transform: scale(0.8);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+@keyframes tada {
+  0% {transform: scale(1);}
+  10%, 20% {transform: scale(0.9) rotate(-3deg);}
+  30%, 50%, 70%, 90% {transform: scale(1.1) rotate(3deg);}
+  40%, 60%, 80% {transform: scale(1.1) rotate(-3deg);}
+  100% {transform: scale(1) rotate(0);}
+}
