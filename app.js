@@ -897,22 +897,27 @@ function handleLedgerImport(event) {
 }
 // In app.js, find the renderDailyTasks function and replace it with this version.
 
+
 // --- START OF REPLACEMENT ---
 function renderDailyTasks(tasksToRender) {
     if (!dailyTaskList) return;
     const now = new Date();
     if (dailyTitleDate) dailyTitleDate.textContent = `(${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')})`;
     
-    // --- 过滤逻辑 ---
+    // --- 【核心】正确的显示过滤逻辑 ---
     const dayMap = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
-    const currentDay = dayMap[now.getDay()];
+    const currentDayCycle = dayMap[now.getDay()]; // 'sun', 'mon', etc.
     const todayString = getTodayString();
 
     const tasksToShow = tasksToRender.filter(task => {
+        // 如果是从未来计划移来的，在被清理前总是显示
+        if (task.fromFuture) return true; 
+
         const cycle = task.cycle || 'daily'; // 兼容旧数据
-        if (cycle === 'daily') return true;
-        if (cycle === 'once') return task.creationDate === todayString;
-        return cycle === currentDay;
+        
+        if (cycle === 'daily') return true; // 每日任务总是显示
+        if (cycle === 'once') return task.creationDate === todayString; // 不重复任务仅在创建日显示
+        return cycle === currentDayCycle; // 每周任务仅在对应星期几显示
     });
     // --- 过滤逻辑结束 ---
 
@@ -927,9 +932,8 @@ function renderDailyTasks(tasksToRender) {
         li.className = 'li-daily';
         if (task.completed) { li.classList.add('completed'); }
         
-        // 【新增】为 "不重复" 任务添加特殊 class
-        if ((task.cycle || 'daily') === 'once') {
-            li.classList.add('is-once');
+        if (task.cycle === 'once' || task.fromFuture) {
+            li.classList.add('is-once'); // 复用 'is-once' 的样式
         }
 
         li.addEventListener('click', (e) => {
@@ -948,13 +952,11 @@ function renderDailyTasks(tasksToRender) {
         
         const taskContent = createTaskContent(task, originalIndex, 'daily', false);
         
-        // 【新增】为 "不重复" 任务添加日期标记
-        if ((task.cycle || 'daily') === 'once') {
+        if (task.cycle === 'once' && task.creationDate) {
             const dateMarker = document.createElement('span');
             dateMarker.className = 'once-date-marker';
             dateMarker.textContent = task.creationDate.substring(5); // 显示 MM-DD
             dateMarker.title = `创建于 ${task.creationDate}`;
-            // 插入到标题组的末尾
             const titleGroup = taskContent.querySelector('.task-title-group');
             if(titleGroup) titleGroup.appendChild(dateMarker);
         }
@@ -966,7 +968,7 @@ function renderDailyTasks(tasksToRender) {
     
     handleCompletionCelebration(
         'daily',
-        tasksToShow, // 【修改】检查的是过滤后的任务列表
+        tasksToShow,
         dailyTaskList,
         '太棒了，您完成了今日的所有任务！'
     );
@@ -2141,36 +2143,77 @@ function renderLedgerSummary(dataToRender) {
     });
 }
 function getTodayString() { const today = new Date(); const year = today.getFullYear(); const month = String(today.getMonth() + 1).padStart(2, '0'); const day = String(today.getDate()).padStart(2, '0'); return `${year}-${month}-${day}`; }
+// --- START OF REPLACEMENT ---
 function cleanupDailyTasks() {
     const todayString = getTodayString();
     let hasChanged = false;
 
-    if (allTasks.daily && allTasks.daily.length > 0) {
-        // 过滤掉过期的“不重复”任务
-        const activeDailyTasks = allTasks.daily.filter(task => {
-            if (task.cycle === 'once') {
-                return task.creationDate === todayString;
-            }
-            return true;
-        });
+    if (!allTasks.daily || allTasks.daily.length === 0) {
+        // 如果没有每日任务，只需检查并更新日期标记
+        if (allTasks.lastDailyResetDate !== todayString) {
+            allTasks.lastDailyResetDate = todayString;
+            return true; // 日期已更新，需要保存
+        }
+        return false;
+    }
 
-        if (activeDailyTasks.length !== allTasks.daily.length) {
-            hasChanged = true;
+    const tasksToKeep = [];
+    const isNewDay = allTasks.lastDailyResetDate !== todayString;
+
+    if (isNewDay) {
+        console.log(`New day detected. Cleaning and resetting daily tasks for ${todayString}.`);
+    }
+
+    for (const task of allTasks.daily) {
+        // 1. 处理从未来计划移来的任务 (只在新的一天处理)
+        if (task.fromFuture && isNewDay) {
+            if (task.completed) {
+                // 已完成 -> 移除
+                hasChanged = true;
+                continue; // 跳过，不加入 tasksToKeep
+            } else {
+                // 未完成 -> 转化为普通每日任务并保留
+                delete task.fromFuture;
+                task.cycle = 'daily';
+                hasChanged = true;
+                // 任务本身会被保留，所以继续往下走
+            }
+        }
+        
+        // 2. 处理不重复 ('once') 任务
+        if (task.cycle === 'once') {
+            if (task.creationDate === todayString) {
+                tasksToKeep.push(task); // 是今天的，保留
+            } else {
+                hasChanged = true; // 过期了，不保留
+            }
+            continue; // 'once' 任务处理完毕，进入下一轮循环
         }
 
-        // 重置所有剩余任务的完成状态
-        activeDailyTasks.forEach(task => {
+        // 3. 处理所有重复任务 ('daily', 'mon', 'tue', etc.)
+        if (isNewDay) {
             if (task.completed) {
                 task.completed = false;
                 hasChanged = true;
             }
-        });
-        
-        allTasks.daily = activeDailyTasks;
+        }
+        tasksToKeep.push(task); // 保留任务
+    }
+
+    // 4. 更新任务列表和重置日期
+    if (allTasks.daily.length !== tasksToKeep.length) {
+        hasChanged = true;
+    }
+    allTasks.daily = tasksToKeep;
+
+    if (isNewDay) {
+        allTasks.lastDailyResetDate = todayString;
+        hasChanged = true;
     }
     
-    return hasChanged; // 返回是否有变动
+    return hasChanged;
 }
+// --- END OF REPLACEMENT ---
 function formatReminderDateTime(timestamp) {
     if (!timestamp) return '';
     try {
