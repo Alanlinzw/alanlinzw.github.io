@@ -156,9 +156,9 @@ body { font-family: 'Inter', sans-serif; min-height: 100vh; width: 100%; margin:
    4. INPUT AREAS
    ========================================================================== */
 .input-area { display: flex; gap: var(--spacing-sm); margin-bottom: var(--spacing-xl); }
-.input-area input[type="text"], .input-area input[type="date"], .input-area input[type="datetime-local"], .input-area input[type="number"] { flex-grow: 1; border: 1px solid var(--control-border-color); background-color: var(--control-bg); border-radius: var(--border-radius-md); padding: 12px 14px; font-size: 15px; font-family: inherit; color: var(--text-color); outline: none; transition: all 0.2s ease; min-width: 0; }
+.input-area input[type="text"], .input-area input[type="date"], .input-area input[type="datetime-local"], .input-area input[type="number"], .input-area select { flex-grow: 1; border: 1px solid var(--control-border-color); background-color: var(--control-bg); border-radius: var(--border-radius-md); padding: 12px 14px; font-size: 15px; font-family: inherit; color: var(--text-color); outline: none; transition: all 0.2s ease; min-width: 0; }
 .input-area input::placeholder { color: var(--light-text-color); opacity: 0.8; }
-.input-area input:focus { border-color: var(--primary-color); background-color: var(--container-bg); box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary-color) 25%, transparent); }
+.input-area input:focus, .input-area select:focus { border-color: var(--primary-color); background-color: var(--container-bg); box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary-color) 25%, transparent); }
 .input-area button { flex-shrink: 0; width: 44px; height: 44px; border: none; background-color: var(--primary-color); color: white; border-radius: var(--border-radius-md); cursor: pointer; font-size: 26px; font-weight: 500; line-height: 44px; transition: background-color 0.2s ease, transform 0.1s ease; }
 .input-area button:hover { background-color: var(--primary-hover-color); transform: scale(1.05); }
 .monthly-input-area { display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; gap: var(--spacing-sm); }
@@ -1128,4 +1128,37 @@ body { padding-bottom: 80px; }
   30%, 50%, 70%, 90% {transform: scale(1.1) rotate(3deg);}
   40%, 60%, 80% {transform: scale(1.1) rotate(-3deg);}
   100% {transform: scale(1) rotate(0);}
+}
+/* 【新增】调整每日清单输入区域以适应新的下拉框 */
+#daily-section .input-area {
+    display: grid;
+    grid-template-columns: 1fr auto auto; /* 调整为三列布局 */
+    align-items: center;
+}
+#daily-section .input-area select {
+    flex-grow: 0; /* 防止下拉框过度伸展 */
+    width: auto;
+    margin: 0; /* 移除继承的 margin-left */
+    height: 44px; /* 确保高度一致 */
+}
+
+/* 【新增】“不重复”任务的特殊样式 */
+.li-daily.is-once {
+    padding-left: calc(var(--spacing-md) + 10px); /* 为左侧高亮条留出空间 */
+    border-left: 5px solid var(--accent-amber);
+}
+
+/* 【新增】“不重复”任务的日期标记 */
+.once-date-marker {
+    margin-left: auto;
+    padding-left: var(--spacing-sm);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--light-text-color);
+    white-space: nowrap;
+    align-self: center;
+}
+
+[data-theme="dark"] .once-date-marker {
+    color: var(--light-text-color);
 }
