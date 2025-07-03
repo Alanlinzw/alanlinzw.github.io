@@ -157,6 +157,35 @@ body { font-family: 'Inter', sans-serif; min-height: 100vh; width: 100%; margin:
    ========================================================================== */
 .input-area { display: flex; gap: var(--spacing-sm); margin-bottom: var(--spacing-xl); }
 .input-area input[type="text"], .input-area input[type="date"], .input-area input[type="datetime-local"], .input-area input[type="number"], .input-area select { flex-grow: 1; border: 1px solid var(--control-border-color); background-color: var(--control-bg); border-radius: var(--border-radius-md); padding: 12px 14px; font-size: 15px; font-family: inherit; color: var(--text-color); outline: none; transition: all 0.2s ease; min-width: 0; }
+.input-area .cycle-select {
+    flex-grow: 0; /* 不拉伸 */
+    flex-shrink: 0; /* 不收缩 */
+    min-width: 100px; /* 给一个最小宽度 */
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    background-image: url('data:image/svg+xml;charset=UTF-8,%3csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="%234A5568"%3e%3cpath fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" /%3e%3c/svg%3e');
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    background-size: 1.1em 1.1em;
+    padding-right: 36px;
+}
+
+/* --- 【核心新增】为深色主题下的 cycle-select 提供特定样式 --- */
+[data-theme="dark"] .input-area .cycle-select {
+    /* 替换为深色主题的箭头图标 (颜色变为 #A0AEC0) */
+    background-image: url('data:image/svg+xml;charset=UTF-8,%3csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="%23A0AEC0"%3e%3cpath fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" /%3e%3c/svg%3e');
+    
+    /* 确保选项的文本颜色也是浅色的（在某些浏览器中需要明确指定） */
+    color: var(--text-color);
+}
+
+.input-area input:focus,
+.input-area .cycle-select:focus { /* 将 .cycle-select 加入 focus 样式组 */
+    border-color: var(--primary-color);
+    background-color: var(--container-bg);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary-color) 25%, transparent);
+}
 .input-area input::placeholder { color: var(--light-text-color); opacity: 0.8; }
 .input-area input:focus, .input-area select:focus { border-color: var(--primary-color); background-color: var(--container-bg); box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary-color) 25%, transparent); }
 .input-area button { flex-shrink: 0; width: 44px; height: 44px; border: none; background-color: var(--primary-color); color: white; border-radius: var(--border-radius-md); cursor: pointer; font-size: 26px; font-weight: 500; line-height: 44px; transition: background-color 0.2s ease, transform 0.1s ease; }
