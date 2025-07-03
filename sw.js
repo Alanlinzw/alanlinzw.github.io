@@ -140,7 +140,8 @@ self.addEventListener('activate', event => {
             })
         )).then(() => {
             console.log('[SW] Old caches deleted, claiming clients.');
-            return self.clients.claim(); // 确保新的 SW 立即控制所有打开的客户端
+            checkAndShowNotifications(); 
+            return self.clients.claim(); 
         })
     );
 });
