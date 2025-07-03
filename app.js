@@ -549,7 +549,24 @@ function addTask(inputElement, taskArrayRefName, onCompleteCallback, options = {
             }
         }
     } else if (type === 'daily') {
-        newTask = { id: generateUniqueId(), text: taskText, completed: false, note: '', links: [] };
+        // --- START OF REPLACEMENT ---
+        const cycleSelect = document.getElementById('new-daily-task-cycle-select');
+        const cycleValue = cycleSelect ? cycleSelect.value : 'daily';
+        
+        newTask = { 
+            id: generateUniqueId(), 
+            text: taskText, 
+            completed: false, 
+            note: '', 
+            links: [],
+            cycle: cycleValue // 新增周期属性
+        };
+        
+        // 如果是不重复任务，记录创建日期
+        if (cycleValue === 'once') {
+            newTask.creationDate = getTodayString();
+        }
+        // --- END OF REPLACEMENT ---
     } else if (type === 'monthly') {
         const tagsString = tagsInputElement ? tagsInputElement.value.trim() : '';
         newTask = { id: generateUniqueId(), text: taskText, completed: false, links: [], progress: 0, progressText: '', subtasks: [], tags: tagsString ? tagsString.split(',').map(tag => tag.trim()).filter(Boolean) : [], completionDate: null, priority: 2 };
@@ -872,13 +889,28 @@ function handleLedgerImport(event) {
 }
 // In app.js, find the renderDailyTasks function and replace it with this version.
 
+// --- START OF REPLACEMENT ---
 function renderDailyTasks(tasksToRender) {
     if (!dailyTaskList) return;
     const now = new Date();
     if (dailyTitleDate) dailyTitleDate.textContent = `(${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')})`;
+    
+    // --- 过滤逻辑 ---
+    const dayMap = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+    const currentDay = dayMap[now.getDay()];
+    const todayString = getTodayString();
+
+    const tasksToShow = tasksToRender.filter(task => {
+        const cycle = task.cycle || 'daily'; // 兼容旧数据
+        if (cycle === 'daily') return true;
+        if (cycle === 'once') return task.creationDate === todayString;
+        return cycle === currentDay;
+    });
+    // --- 过滤逻辑结束 ---
+
     dailyTaskList.innerHTML = '';
     const fragment = document.createDocumentFragment();
-    tasksToRender.forEach((task) => {
+    tasksToShow.forEach((task) => {
         const originalIndex = allTasks.daily.findIndex(t => t.id === task.id);
         if (originalIndex === -1 && !task.id) {
             console.warn("Daily task missing ID, cannot determine originalIndex:", task);
@@ -886,10 +918,14 @@ function renderDailyTasks(tasksToRender) {
         const li = document.createElement('li');
         li.className = 'li-daily';
         if (task.completed) { li.classList.add('completed'); }
+        
+        // 【新增】为 "不重复" 任务添加特殊 class
+        if ((task.cycle || 'daily') === 'once') {
+            li.classList.add('is-once');
+        }
 
-        // 添加点击事件以展开/折叠
         li.addEventListener('click', (e) => {
-            if (e.target.closest('a, button, input, .checkbox')) {
+            if (e.target.closest('a, button, input, .checkbox, .drag-handle')) {
                 return;
             }
             const isExpanded = li.classList.toggle('is-expanded');
@@ -900,23 +936,34 @@ function renderDailyTasks(tasksToRender) {
             }
         });
 
-        // Drag handle 不在移动端渲染，但桌面端可能需要，所以用 createDragHandle
         li.appendChild(createDragHandle());
-
-        // createTaskContent 现在会创建所有需要的内部结构
-        li.appendChild(createTaskContent(task, originalIndex, 'daily', false));
-
+        
+        const taskContent = createTaskContent(task, originalIndex, 'daily', false);
+        
+        // 【新增】为 "不重复" 任务添加日期标记
+        if ((task.cycle || 'daily') === 'once') {
+            const dateMarker = document.createElement('span');
+            dateMarker.className = 'once-date-marker';
+            dateMarker.textContent = task.creationDate.substring(5); // 显示 MM-DD
+            dateMarker.title = `创建于 ${task.creationDate}`;
+            // 插入到标题组的末尾
+            const titleGroup = taskContent.querySelector('.task-title-group');
+            if(titleGroup) titleGroup.appendChild(dateMarker);
+        }
+        
+        li.appendChild(taskContent);
         fragment.appendChild(li);
     });
     dailyTaskList.appendChild(fragment);
+    
     handleCompletionCelebration(
         'daily',
-        allTasks.daily, // 检查的是完整的每日任务列表
+        tasksToShow, // 【修改】检查的是过滤后的任务列表
         dailyTaskList,
         '太棒了，您完成了今日的所有任务！'
     );
 }
-
+// --- END OF REPLACEMENT ---
 function renderMonthlyTasks(dataToRender, isHistoryView) {
     if (!monthlyTaskList) return;
 
@@ -2086,6 +2133,36 @@ function renderLedgerSummary(dataToRender) {
     });
 }
 function getTodayString() { const today = new Date(); const year = today.getFullYear(); const month = String(today.getMonth() + 1).padStart(2, '0'); const day = String(today.getDate()).padStart(2, '0'); return `${year}-${month}-${day}`; }
+function cleanupDailyTasks() {
+    const todayString = getTodayString();
+    let hasChanged = false;
+
+    if (allTasks.daily && allTasks.daily.length > 0) {
+        // 过滤掉过期的“不重复”任务
+        const activeDailyTasks = allTasks.daily.filter(task => {
+            if (task.cycle === 'once') {
+                return task.creationDate === todayString;
+            }
+            return true;
+        });
+
+        if (activeDailyTasks.length !== allTasks.daily.length) {
+            hasChanged = true;
+        }
+
+        // 重置所有剩余任务的完成状态
+        activeDailyTasks.forEach(task => {
+            if (task.completed) {
+                task.completed = false;
+                hasChanged = true;
+            }
+        });
+        
+        allTasks.daily = activeDailyTasks;
+    }
+    
+    return hasChanged; // 返回是否有变动
+}
 function formatReminderDateTime(timestamp) {
     if (!timestamp) return '';
     try {
@@ -3697,6 +3774,15 @@ try {
         return; // 阻止后续执行
     }
     
+    // --- START OF REPLACEMENT ---
+    // 【修改】执行每日任务清理，并仅在有变动时保存
+    const dailyTasksChanged = cleanupDailyTasks();
+    if (dailyTasksChanged) {
+        console.log("initializeApp: 每日任务已清理，正在保存...");
+        await saveTasks(); // 注意: saveTasks 内部会触发自动同步
+    }
+    // --- END OF REPLACEMENT ---
+
     checkAndMoveFutureTasks(); // 检查并移动到期的未来任务
     console.log("initializeApp: 到期的未来任务已检查并移动。");
 
