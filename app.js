@@ -933,7 +933,10 @@ function renderDailyTasks(tasksToRender) {
         if (task.completed) { li.classList.add('completed'); }
         
         if (task.cycle === 'once' || task.fromFuture) {
-            li.classList.add('is-once'); // 复用 'is-once' 的样式
+            li.classList.add('is-once'); 
+            if (task.fromFuture) {
+                li.title = '到期的计划任务 (次日将自动消失)';
+            }
         }
 
         li.addEventListener('click', (e) => {
@@ -2148,54 +2151,50 @@ function cleanupDailyTasks() {
     const todayString = getTodayString();
     let hasChanged = false;
 
+    // 获取上次重置的日期，如果不存在则设为一个很早的日期
+    const lastResetDate = allTasks.lastDailyResetDate || '1970-01-01';
+    
+    // 只有在新的一天才执行清理和重置
+    if (lastResetDate === todayString) {
+        return false; // 今天已经处理过了，直接返回
+    }
+    
+    console.log(`New day detected. Cleaning and resetting daily tasks for ${todayString}.`);
+
     if (!allTasks.daily || allTasks.daily.length === 0) {
-        // 如果没有每日任务，只需检查并更新日期标记
-        if (allTasks.lastDailyResetDate !== todayString) {
-            allTasks.lastDailyResetDate = todayString;
-            return true; // 日期已更新，需要保存
-        }
-        return false;
+        // 如果没有每日任务，只需更新日期标记
+        allTasks.lastDailyResetDate = todayString;
+        return true; // 日期已更新，需要保存
     }
 
     const tasksToKeep = [];
-    const isNewDay = allTasks.lastDailyResetDate !== todayString;
-
-    if (isNewDay) {
-        console.log(`New day detected. Cleaning and resetting daily tasks for ${todayString}.`);
-    }
-
+    
     for (const task of allTasks.daily) {
-        // 1. 处理从未来计划移来的任务 (只在新的一天处理)
-        if (task.fromFuture && isNewDay) {
-            if (task.completed) {
-                // 已完成 -> 移除
-                hasChanged = true;
-                continue; // 跳过，不加入 tasksToKeep
-            } else {
-                // 未完成 -> 转化为普通每日任务并保留
-                delete task.fromFuture;
-                task.cycle = 'daily';
-                hasChanged = true;
-                // 任务本身会被保留，所以继续往下走
-            }
+        // 1. 【核心修改】处理从未来计划移来的任务
+        // 只要带有 fromFuture 标记，第二天就直接移除，无论是否完成
+        if (task.fromFuture) {
+            hasChanged = true;
+            console.log(`Removing expired planned task: "${task.text}"`);
+            continue; // 跳过，不加入 tasksToKeep
         }
         
         // 2. 处理不重复 ('once') 任务
+        // 这个逻辑与插件版不同，PWA版本中不重复任务在创建日之后即被移除
         if (task.cycle === 'once') {
             if (task.creationDate === todayString) {
                 tasksToKeep.push(task); // 是今天的，保留
             } else {
                 hasChanged = true; // 过期了，不保留
+                console.log(`Removing one-time task: "${task.text}"`);
             }
             continue; // 'once' 任务处理完毕，进入下一轮循环
         }
 
-        // 3. 处理所有重复任务 ('daily', 'mon', 'tue', etc.)
-        if (isNewDay) {
-            if (task.completed) {
-                task.completed = false;
-                hasChanged = true;
-            }
+        // 3. 处理所有其他重复任务 ('daily', 'mon', 'tue', etc.)
+        // 重置它们的完成状态
+        if (task.completed) {
+            task.completed = false;
+            hasChanged = true;
         }
         tasksToKeep.push(task); // 保留任务
     }
@@ -2205,15 +2204,11 @@ function cleanupDailyTasks() {
         hasChanged = true;
     }
     allTasks.daily = tasksToKeep;
-
-    if (isNewDay) {
-        allTasks.lastDailyResetDate = todayString;
-        hasChanged = true;
-    }
+    allTasks.lastDailyResetDate = todayString;
     
-    return hasChanged;
+    // 只要是新的一天，lastDailyResetDate 就会更新，所以 hasChanged 至少为 true
+    return true; 
 }
-// --- END OF REPLACEMENT ---
 function formatReminderDateTime(timestamp) {
     if (!timestamp) return '';
     try {
@@ -2802,7 +2797,9 @@ function checkAndMoveFutureTasks() {
                     text: `[计划] ${task.text}`, 
                     completed: false, 
                     note: task.note || (task.progressText || ''), 
-                    links: task.links || [] 
+                    links: task.links || [],
+                    // 【核心新增】添加 fromFuture 标记
+                    fromFuture: true 
                 });
             });
             allTasks.future = remainingFutureTasks; // 更新 future 列表
