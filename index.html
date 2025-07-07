@@ -55,6 +55,10 @@
                         <img src="images/icon-features.svg" alt="Features">
                         <span>功能亮点</span>
                     </button>
+                        <button id="backup-restore-btn" class="more-actions-menu-item" title="备份与恢复">
+        <img src="images/icon-backup.svg" alt="Backup"> <!-- 确保你有这个图标 -->
+        <span>备份与恢复</span>
+    </button>
                     <button id="feedback-btn" title="反馈与建议">
                         <img src="images/icon-feedback.svg" alt="Feedback">
                         <span>反馈建议</span>
@@ -203,7 +207,7 @@
             </ul>
         </div>
     </div>
-
+<input type="file" id="restore-file-input" class="hidden-file-input" accept=".json">
     <!-- Modals -->
     <div id="stats-modal" class="modal-overlay hidden">
         <div class="modal-content stats-modal-content">
@@ -392,5 +396,15 @@
             showSection(initialSectionId);
         });
     </script>
+    <div id="version-history-modal" class="modal-overlay hidden">
+    <div class="modal-content history-modal-content">
+        <button id="version-history-close-btn" class="modal-close">×</button>
+        <h2 id="version-history-title">历史快照 (最近14天)</h2>
+        <div id="version-list" class="features-list-style" style="max-height: 400px; overflow-y: auto;">
+            <!-- 历史版本将由JS动态生成 -->
+        </div>
+        <p class="modal-footer">（选择一个版本以恢复）</p>
+    </div>
+</div>
 </body>
 </html>
