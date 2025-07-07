@@ -4248,3 +4248,4 @@ function showUpdatePrompt(worker) {
         }
     });
 }
+});
