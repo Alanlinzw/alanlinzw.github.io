@@ -4238,4 +4238,3 @@ function showUpdatePrompt(worker) {
         }
     });
 }
-});
