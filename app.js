@@ -4063,6 +4063,28 @@ try {
     switchView('daily-section'); // 默认显示每日清单
     console.log("initializeApp: 初始视图已切换到每日清单。");
 
+     if ('serviceWorker' in navigator && 'PeriodicSyncManager' in window) {
+        try {
+            const registration = await navigator.serviceWorker.ready;
+            // 在注册前，先检查权限状态
+            const status = await navigator.permissions.query({name: 'periodic-background-sync'});
+            if (status.state === 'granted') {
+                // 权限已授予，可以注册
+                await registration.periodicSync.register('daily-todo-backup', {
+                    minInterval: 12 * 60 * 60 * 1000, // 至少每 12 小时尝试一次
+                });
+                console.log('Periodic Background Sync for daily backup registered.');
+            } else {
+                console.warn('Periodic Background Sync permission not granted. Automatic background backup may not work.');
+                // 你可以在这里选择性地向用户解释，或者静默处理
+            }
+        } catch (e) {
+            console.error('Periodic Background Sync could not be registered!', e);
+        }
+    } else {
+        console.log('Periodic Background Sync not supported in this browser. Fallback to activate/startup checks.');
+    }
+
     console.log("initializeApp: 应用初始化完成。");
 }
 
