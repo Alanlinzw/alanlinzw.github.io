@@ -1,25 +1,26 @@
-// sw.js (PWA 完整重构版) - 版本 4.0.1
+// sw.js (PWA 完整重构版) - 版本 4.0.2
 
 // ========================================================================
 // 0. IndexedDB 帮助库
 // ========================================================================
-
-// 【修正】为两个数据库创建独立的存储实例
-function createStore(dbName, storeName) {
-    const request = indexedDB.open(dbName, 1); // 使用版本 1
-    request.onupgradeneeded = (event) => {
-        const db = event.target.result;
-        if (!db.objectStoreNames.contains(storeName)) {
-            db.createObjectStore(storeName);
-        }
-    };
-    return promisifyRequest(request);
-}
-
 function promisifyRequest(request) {
     return new Promise((resolve, reject) => {
         request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
+        request.onerror = (event) => reject(event.target.error || 'IndexedDB a_request_error');
+    });
+}
+
+function createStore(dbName, storeName) {
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open(dbName, 1);
+        request.onerror = (event) => reject('无法打开数据库: ' + dbName);
+        request.onsuccess = (event) => resolve(event.target.result);
+        request.onupgradeneeded = (event) => {
+            const db = event.target.result;
+            if (!db.objectStoreNames.contains(storeName)) {
+                db.createObjectStore(storeName);
+            }
+        };
     });
 }
 
@@ -72,7 +73,7 @@ const backupDb = {
 // ========================================================================
 // 1. Service Worker 生命周期事件
 // ========================================================================
-const CACHE_NAME = 'todo-list-cache-v9'; // 【MODIFIED】缓存版本号更新
+const CACHE_NAME = 'todo-list-cache-v10'; // 【MODIFIED】缓存版本号更新
 // 应用外壳通常是相对路径
 const APP_SHELL_URLS = [
   '/', 
@@ -149,20 +150,29 @@ self.addEventListener('install', event => {
 
 self.addEventListener('activate', event => {
     console.log('[SW] Activate event');
-    const cacheWhitelist = [CACHE_NAME];
     event.waitUntil(
-        caches.keys().then(cacheNames => Promise.all(
-            cacheNames.map(cacheName => {
-                if (!cacheWhitelist.includes(cacheName)) {
-                    console.log('[SW] Deleting old cache:', cacheName);
-                    return caches.delete(cacheName);
-                }
-            })
-        )).then(() => {
-            console.log('[SW] Activate: Claiming clients and running initial backup check.');
-            handleAutoBackup(); // 在激活时立即检查一次是否需要备份
-            return self.clients.claim();
-        })
+        (async () => {
+            // 1. 清理旧缓存
+            const cacheWhitelist = [CACHE_NAME];
+            const cacheNames = await caches.keys();
+            await Promise.all(
+                cacheNames.map(cacheName => {
+                    if (!cacheWhitelist.includes(cacheName)) {
+                        console.log('[SW] Deleting old cache:', cacheName);
+                        return caches.delete(cacheName);
+                    }
+                })
+            );
+            console.log('[SW] Old caches deleted.');
+
+            // 2. 立即控制所有客户端
+            await self.clients.claim();
+            console.log('[SW] Clients claimed.');
+
+            // 3. 触发一次启动时的自动备份检查
+            console.log('[SW] Running initial backup check on activation.');
+            await handleAutoBackup();
+        })()
     );
 });
 
@@ -281,78 +291,82 @@ self.addEventListener('periodicsync', (event) => {
 // 2. 监听来自主应用的消息来安排提醒
 // ========================================================================
 self.addEventListener('message', event => {
-
     if (!event.data) return;
 
-    if (event.data.action === 'getBackupVersions') {
-        (async () => {
-            try {
-                const keys = await backupDb.getAllKeys();
-                if (event.ports[0]) {
-                    event.ports[0].postMessage({ success: true, versions: keys.sort((a, b) => b - a) });
-                }
-            } catch (error) {
-                if (event.ports[0]) {
-                    event.ports[0].postMessage({ success: false, message: error.message });
-                }
-            }
-        })();
-    } else if (event.data.action === 'restoreFromBackup') {
-        (async () => {
-            try {
-                const restoredData = await backupDb.get(event.data.timestamp);
-                if (restoredData) {
-                    if (event.ports[0]) {
-                        event.ports[0].postMessage({ success: true, data: restoredData });
-                    }
-                } else {
-                    throw new Error('找不到指定的备份版本。');
-                }
-            } catch (error) {
-                if (event.ports[0]) {
-                    event.ports[0].postMessage({ success: false, message: error.message });
-                }
-            }
-        })();
-    if (event.data && event.data.type === 'SCHEDULE_REMINDER') {
-        const { task } = event.data.payload;
-        if (!task || !task.reminderTime || !task.id) {
-            console.error('[SW] Invalid task data for reminder:', task);
-            return;
-        }
-        console.log('[SW] Received SCHEDULE_REMINDER for task:', task.id, new Date(task.reminderTime));
-        const delay = new Date(task.reminderTime).getTime() - Date.now();
-        if (delay > 0) {
-            console.log(`[SW] Scheduling notification check in ${delay}ms for task ${task.id}`);
-            // 注意: setTimeout 在 Service Worker 中可能因 SW 休眠而不可靠。
-            // 真实生产环境应结合 Push API 或 Periodic Background Sync API。
-            // 此处为简化，依赖于 SW 在需要时被激活（例如通过 fetch, push, sync 事件）。
-            // 或者客户端在应用启动时触发检查。
-            setTimeout(() => {
-                console.log(`[SW] Timeout reached for task ${task.id}. Checking notifications.`);
-                checkAndShowNotifications();
-            }, delay);
-        } else if (task.reminderTime && task.reminderTime <= Date.now()) {
-            // 如果任务已经是过去的，立即检查（可能是在应用启动时补发）
-            console.log('[SW] Task reminder time is in the past, checking notifications now for task:', task.id);
-            checkAndShowNotifications();
-        }
-    } else if (event.data && event.data.action === 'skipWaiting') {
-        self.skipWaiting();
-    } else if (event.data && event.data.type === 'UPDATE_REMINDER') { // 【NEW】处理提醒更新
-        // 简单处理：当 SW 下次检查通知时，会使用更新后的任务信息。
-        // 更复杂的实现会取消旧的 setTimeout (如果用 task.id 作为 key 存储 timeoutId) 并设置新的。
-        console.log('[SW] Received UPDATE_REMINDER for task ID:', event.data.payload.task.id, '. Reminder will be based on updated data during next check.');
-    } else if (event.data && event.data.type === 'CANCEL_REMINDER') { // 【NEW】处理提醒取消
-        // 简单处理：如果任务从 allTasks.future 中被删除或其 reminderTime 被清除，
-        // checkAndShowNotifications 自然不会为它发送通知。
-        // 更复杂的实现会清除特定的 setTimeout。
-        console.log('[SW] Received CANCEL_REMINDER for task ID:', event.data.payload.taskId, '. Notification (if pending via setTimeout) may still fire unless task data is updated/removed.');
-    }
-   
+    // 解构消息内容，优先使用 action，备用 type
+    const { action, type, payload, timestamp } = event.data;
+    const messageType = action || type;
+    const port = event.ports[0];
 
-    if (event.data && event.data.action === 'skipWaiting') {
-        self.skipWaiting();
+    // 使用 switch 语句，结构清晰，确保每个消息只被处理一次
+    switch (messageType) {
+        case 'getBackupVersions':
+            (async () => {
+                try {
+                    const keys = await backupDb.getAllKeys();
+                    if (port) port.postMessage({ success: true, versions: keys.sort((a, b) => b - a) });
+                } catch (error) {
+                    if (port) port.postMessage({ success: false, message: error.message });
+                }
+            })();
+            break;
+
+        case 'restoreFromBackup':
+            (async () => {
+                try {
+                    const restoredData = await backupDb.get(timestamp);
+                    if (restoredData) {
+                        if (port) port.postMessage({ success: true, data: restoredData });
+                    } else {
+                        throw new Error('找不到指定的备份版本。');
+                    }
+                } catch (error) {
+                    if (port) port.postMessage({ success: false, message: error.message });
+                }
+            })();
+            break;
+
+        case 'SCHEDULE_REMINDER':
+            if (!payload || !payload.task) {
+                console.error('[SW] SCHEDULE_REMINDER: 无效的 payload。');
+                break;
+            }
+            const { task } = payload;
+            if (!task.reminderTime || !task.id) {
+                console.error('[SW] SCHEDULE_REMINDER: 任务数据不完整。', task);
+                break;
+            }
+            console.log('[SW] Received SCHEDULE_REMINDER for task:', task.id, new Date(task.reminderTime));
+            const delay = new Date(task.reminderTime).getTime() - Date.now();
+            if (delay > 0) {
+                // 注意: setTimeout 在 Service Worker 中可能因 SW 休眠而不可靠。
+                // 这是一个简化的实现。
+                setTimeout(() => {
+                    console.log(`[SW] Timeout reached for task ${task.id}. Checking notifications.`);
+                    checkAndShowNotifications();
+                }, delay);
+            }
+            break;
+
+        case 'UPDATE_REMINDER':
+            if (!payload || !payload.task || !payload.task.id) break;
+            console.log('[SW] Received UPDATE_REMINDER for task ID:', payload.task.id);
+            // 简单实现：不主动操作，依赖 checkAndShowNotifications 读取最新数据。
+            break;
+
+        case 'CANCEL_REMINDER':
+            if (!payload || !payload.taskId) break;
+            console.log('[SW] Received CANCEL_REMINDER for task ID:', payload.taskId);
+            // 简单实现：不主动操作。
+            break;
+
+        case 'skipWaiting':
+            self.skipWaiting();
+            break;
+            
+        default:
+            console.warn('[SW] Received unknown message action/type:', messageType, event.data);
+            break;
     }
 });
 
@@ -363,17 +377,15 @@ const MAX_BACKUPS = 14;
 async function handleAutoBackup() {
     console.log('[SW-Backup] 开始执行每日自动备份...');
     try {
-        // 【核心修复】从主数据库 'EfficienTodoDB' 读取数据
+        // 从主数据库 'EfficienTodoDB' 读取数据
         const tasks = await mainDb.get('allTasks');
         
-        // 如果数据为空或不包含任务，则跳过
         if (!tasks || (!tasks.daily?.length && !tasks.monthly?.length)) {
-            console.log('[SW-Backup] 主数据为空，跳过本次备份。');
+            console.log('[SW-Backup] 主数据为空或不包含任务，跳过本次备份。');
             return;
         }
 
         const timestamp = Date.now();
-        // 【核心修复】将数据写入备份数据库 'EfficienTodo_Backups'
         await backupDb.set(timestamp, tasks);
         console.log(`[SW-Backup] 成功创建新的备份快照: ${new Date(timestamp).toLocaleString()}`);
         
@@ -391,94 +403,69 @@ async function handleAutoBackup() {
         console.error('[SW-Backup] 自动备份过程中发生错误:', error);
     }
 }
-
 // ========================================================================
 // 3. 核心：本地通知检查与显示逻辑 (重构)
 // ========================================================================
+
 async function checkAndShowNotifications() {
     console.log('[SW] checkAndShowNotifications called.');
     try {
-        const allTasksData = await db.get('allTasks'); 
+        // 使用 mainDb 帮助库来获取主数据
+        const allTasksData = await mainDb.get('allTasks');
         
         if (!allTasksData || !allTasksData.future || !Array.isArray(allTasksData.future)) {
-            console.log('[SW] No valid future tasks data found in DB for notifications.');
             return;
         }
         
-        // 创建一个副本进行操作，以防直接修改从DB获取的对象可能引发的问题
         const allTasks = JSON.parse(JSON.stringify(allTasksData)); 
-
-        if (allTasks.future.length === 0) {
-            // console.log('[SW] No future tasks to check for notifications.');
-            return;
-        }
-        
         const now = Date.now();
         const dueTasks = [];
         const remainingFutureTasks = [];
-        let dbChangedByNotifications = false;
 
         allTasks.future.forEach(task => {
-            // 只有当任务有 reminderTime 且已到期时才处理
             if (task.reminderTime && task.reminderTime <= now) {
                 dueTasks.push(task);
-                dbChangedByNotifications = true; // 标记有任务将被处理和移动
             } else {
                 remainingFutureTasks.push(task);
             }
         });
         
         if (dueTasks.length > 0) {
-            console.log(`[SW] Found ${dueTasks.length} due tasks for notification.`);
-            allTasks.future = remainingFutureTasks; // 更新 future 列表，移除已到期的
+            allTasks.future = remainingFutureTasks;
 
-            // 1. 显示通知
             for (const task of dueTasks) {
-                console.log(`[SW] Showing notification for: ${task.text}`);
-                // 确保有权限显示通知 (SW 通常在安装时请求或已获得)
                 if (self.registration && typeof self.registration.showNotification === 'function') {
-                    await self.registration.showNotification('高效待办清单提醒', { // 标题可以更具体
+                    await self.registration.showNotification('高效待办清单提醒', {
                         body: task.text,
-                        icon: '/images/icons/icon-192x192.png', // PWA 图标
-                        badge: '/images/icons/icon-192x192.png', // Android 状态栏小图标
-                        tag: task.id, // 使用任务 ID作为标签，防止重复或用于更新
-                        renotify: true, // 如果已有相同 tag 的通知，是否重新通知用户
-                        data: { 
-                            url: self.registration.scope + '#future-section', // 【MODIFIED】点击通知后打开到未来计划区域
-                            taskId: task.id 
-                        }
+                        icon: '/images/icons/icon-192x192.png',
+                        tag: task.id,
+                        data: { url: self.registration.scope + '#future-section', taskId: task.id }
                     });
-                } else {
-                    console.warn('[SW] Cannot show notification: self.registration.showNotification is not available.');
                 }
-
-                // 2. 将到期任务移动到每日清单
-                if (!Array.isArray(allTasks.daily)) {
-                    allTasks.daily = [];
-                }
-                // 检查是否已存在 (以防重复移动)
+                
                 if (!allTasks.daily.some(d => d.originalFutureId === task.id)) {
                     allTasks.daily.unshift({
-                        id: `daily_${Date.now()}_${Math.random().toString(36).substr(2,5)}`, // 新每日任务ID
-                        text: `[计划] ${task.text}`, // 标记来源
+                        id: `daily_${Date.now()}_${Math.random().toString(36).substr(2,5)}`,
+                        text: `[计划] ${task.text}`,
                         completed: false,
-                        note: task.progressText || task.note || '', // 继承备注
+                        note: task.progressText || task.note || '',
                         links: task.links || [],
-                        originalFutureId: task.id // 记录原始未来任务ID
+                        originalFutureId: task.id,
+                        fromFuture: true // 标记来源
                     });
                 }
             }
             
-            // 3. 保存整个更新后的 allTasks 对象回 IndexedDB
-            allTasks.lastUpdatedLocal = Date.now(); // 更新时间戳
-            await db.set('allTasks', allTasks);
-            console.log('[SW] Due tasks processed, moved to daily list, and DB updated.');
-
-        } else {
-             // console.log('[SW] No due notifications found at this time.');
+            // 【重要】将更新后的数据写回主数据库，而不是备份数据库
+            allTasks.lastUpdatedLocal = Date.now();
+            const mainDbWrite = await createStore('EfficienTodoDB', 'data');
+            const tx = mainDbWrite.transaction('data', 'readwrite');
+            await promisifyRequest(tx.objectStore('data').put(allTasks, 'allTasks'));
+            mainDbWrite.close();
+            console.log('[SW] 到期任务处理完毕，主数据已更新。');
         }
     } catch (error) {
-        console.error("[SW] Error checking/showing notifications:", error);
+        console.error("[SW] 检查或显示通知时出错:", error);
     }
 }
 
