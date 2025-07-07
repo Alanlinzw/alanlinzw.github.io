@@ -4189,31 +4189,10 @@ try {
         console.log('Periodic Background Sync not supported in this browser. Fallback to activate/startup checks.');
     }
 // 【新增】监听来自 Service Worker 的消息
-    if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.addEventListener('message', event => {
-            if (event.data && event.data.type === 'TASK_DUE') {
-                console.log('[PWA] Received TASK_DUE message from SW for task ID:', event.data.payload.taskId);
-                // 收到消息后，可以立即执行任务移动，或者只是标记一下，在下次刷新时处理
-                // 为了立即响应，我们直接调用处理函数
-                handleTaskDue(event.data.payload.taskId);
-            }
-            // 这里可以添加对其他SW消息的处理
-        });
-    }
-    console.log("initializeApp: 应用初始化完成。");
-}
-
-// 最终的启动入口
-if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initializeApp);
-} else {
-    initializeApp();
-}
-
-// Service Worker 更新逻辑 (保持不变)
-// ... (你现有的 Service Worker 更新逻辑) ...
-let newWorker;
 if ('serviceWorker' in navigator) {
+    let newWorker;
+
+    // 1. 监听新版本安装
     navigator.serviceWorker.ready.then(reg => {
         if (!reg) return;
         reg.addEventListener('updatefound', () => {
@@ -4221,42 +4200,51 @@ if ('serviceWorker' in navigator) {
             if (!newWorker) return;
             newWorker.addEventListener('statechange', () => {
                 if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                    openCustomPrompt({
-                        title: "应用更新",
-                        message: "新版本已准备就绪，刷新以应用更新吗？",
-                        confirmText: "刷新",
-                        cancelText: "稍后",
-                        onConfirm: () => {
-                            newWorker.postMessage({ action: 'skipWaiting' });
-                        },
-                        onCancel: () => console.log("User chose to update later.")
-                    });
+                    // 新SW已安装，弹出更新提示
+                    showUpdatePrompt(newWorker);
                 }
             });
         });
-    }).catch(error => console.error("Error getting SW registration for update check:", error));
+    }).catch(error => console.error("Error setting up 'updatefound' listener:", error));
 
+    // 2. 检查页面加载时是否已经有等待中的新版本
     navigator.serviceWorker.getRegistration().then(reg => {
         if (reg && reg.waiting) {
             newWorker = reg.waiting;
-             openCustomPrompt({
-                title: "应用更新",
-                message: "检测到应用有更新，刷新以应用最新版本吗？",
-                confirmText: "刷新",
-                cancelText: "稍后",
-                onConfirm: () => {
-                    newWorker.postMessage({ action: 'skipWaiting' });
-                },
-                onCancel: () => console.log("User chose to update later (on load).")
-            });
+            showUpdatePrompt(newWorker);
         }
-    }).catch(error => console.error("Error getting SW registration for waiting check:", error));
+    }).catch(error => console.error("Error checking for waiting Service Worker:", error));
 
-    let refreshing;
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
-        if (refreshing) return;
-        console.log("Controller changed, reloading page.");
-        window.location.reload();
-        refreshing = true;
+    // 【核心修复】移除激进的自动刷新逻辑
+    // let refreshing;
+    // navigator.serviceWorker.addEventListener('controllerchange', () => {
+    //     if (refreshing) return;
+    //     window.location.reload();
+    //     refreshing = true;
+    // });
+}
+
+// 【新增】一个统一的函数来显示更新提示框
+function showUpdatePrompt(worker) {
+    openCustomPrompt({
+        title: "应用更新",
+        message: "新版本已准备就绪，刷新以应用最新版本吗？",
+        confirmText: "刷新",
+        cancelText: "稍后",
+        onConfirm: () => {
+            // 当用户点击“刷新”时，我们来控制整个流程
+            if (worker) {
+                worker.postMessage({ action: 'skipWaiting' });
+                // 等待一小段时间，让 skipWaiting 生效，然后手动刷新
+                setTimeout(() => {
+                    console.log("Reloading page to apply update...");
+                    window.location.reload();
+                }, 500); // 500ms 延迟足够
+            }
+            // onConfirm 会自动关闭提示框，这里无需手动关闭
+        },
+        onCancel: () => {
+            console.log("User chose to update later.");
+        }
     });
 }
