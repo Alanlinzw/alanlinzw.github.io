@@ -1,59 +1,78 @@
-// ========================================================================
-// 0. IndexedDB 帮助库 (简化 - PWA 中我们只操作一个 key-value store)
-// ========================================================================
-function promisifyRequest(request) {
-    return new Promise((resolve, reject) => {
-        // 对于 IDBRequest，onsuccess 和 onerror 是主要事件
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-        // oncomplete 和 onabort 是 IDBTransaction 的事件，不直接用于 IDBRequest promise 封装
-    });
-}
+// sw.js (PWA 完整重构版) - 版本 4.0.1
 
+// ========================================================================
+// 0. IndexedDB 帮助库
+// ========================================================================
+
+// 【修正】为两个数据库创建独立的存储实例
 function createStore(dbName, storeName) {
-    const request = indexedDB.open(dbName, 3); // 版本号与 app.js 中保持一致
+    const request = indexedDB.open(dbName, 1); // 使用版本 1
     request.onupgradeneeded = (event) => {
         const db = event.target.result;
         if (!db.objectStoreNames.contains(storeName)) {
             db.createObjectStore(storeName);
         }
     };
-    const dbp = promisifyRequest(request);
-    return (txMode, callback) => dbp.then((db) => {
-        const transaction = db.transaction(storeName, txMode);
-        const store = transaction.objectStore(storeName);
-        return callback(store, transaction); // 将事务也传递给回调，以便在回调中完成事务
-    }).catch(err => {
-        console.error("IndexedDB store operation failed:", err);
-        throw err; // 重新抛出错误，以便调用者可以捕获
+    return promisifyRequest(request);
+}
+
+function promisifyRequest(request) {
+    return new Promise((resolve, reject) => {
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
     });
 }
 
-const dbStore = createStore('EfficienTodoDB', 'data'); 
+// 主数据存储
+const mainDb = {
+    get: async (key) => {
+        const db = await createStore('EfficienTodoDB', 'data');
+        const tx = db.transaction('data', 'readonly');
+        const store = tx.objectStore('data');
+        const result = await promisifyRequest(store.get(key));
+        db.close();
+        return result;
+    }
+};
 
-const db = {
-    get(key) {
-        return dbStore('readonly', (store) => promisifyRequest(store.get(key)));
+// 备份数据存储
+const backupDb = {
+    get: async (key) => {
+        const db = await createStore('EfficienTodo_Backups', 'versions');
+        const tx = db.transaction('versions', 'readonly');
+        const store = tx.objectStore('versions');
+        const result = await promisifyRequest(store.get(key));
+        db.close();
+        return result;
     },
-    set(key, value) {
-        // 确保事务在 put 完成后才结束
-        return dbStore('readwrite', (store, transaction) => {
-            const req = store.put(value, key);
-            return new Promise((resolve, reject) => {
-                req.onsuccess = () => resolve(req.result);
-                req.onerror = () => reject(req.error);
-                transaction.oncomplete = () => resolve(req.result); // 确保事务完成后再 resolve
-                transaction.onerror = () => reject(transaction.error);
-                transaction.onabort = () => reject(transaction.error);
-            });
-        });
+    set: async (key, value) => {
+        const db = await createStore('EfficienTodo_Backups', 'versions');
+        const tx = db.transaction('versions', 'readwrite');
+        const store = tx.objectStore('versions');
+        await promisifyRequest(store.put(value, key));
+        db.close();
     },
+    delete: async (key) => {
+        const db = await createStore('EfficienTodo_Backups', 'versions');
+        const tx = db.transaction('versions', 'readwrite');
+        const store = tx.objectStore('versions');
+        await promisifyRequest(store.delete(key));
+        db.close();
+    },
+    getAllKeys: async () => {
+        const db = await createStore('EfficienTodo_Backups', 'versions');
+        const tx = db.transaction('versions', 'readonly');
+        const store = tx.objectStore('versions');
+        const keys = await promisifyRequest(store.getAllKeys());
+        db.close();
+        return keys;
+    }
 };
 
 // ========================================================================
 // 1. Service Worker 生命周期事件
 // ========================================================================
-const CACHE_NAME = 'todo-list-cache-v8'; // 【MODIFIED】缓存版本号更新
+const CACHE_NAME = 'todo-list-cache-v9'; // 【MODIFIED】缓存版本号更新
 // 应用外壳通常是相对路径
 const APP_SHELL_URLS = [
   '/', 
@@ -130,7 +149,7 @@ self.addEventListener('install', event => {
 
 self.addEventListener('activate', event => {
     console.log('[SW] Activate event');
-    const cacheWhitelist = [CACHE_NAME]; // 只保留当前版本的缓存
+    const cacheWhitelist = [CACHE_NAME];
     event.waitUntil(
         caches.keys().then(cacheNames => Promise.all(
             cacheNames.map(cacheName => {
@@ -140,13 +159,8 @@ self.addEventListener('activate', event => {
                 }
             })
         )).then(() => {
-            console.log('[SW] Old caches deleted, claiming clients.');
-            checkAndShowNotifications(); 
-            return self.clients.claim(); 
- .then(() => {
             console.log('[SW] Activate: Claiming clients and running initial backup check.');
-            // 在激活时立即检查一次是否需要备份
-            handleAutoBackup();
+            handleAutoBackup(); // 在激活时立即检查一次是否需要备份
             return self.clients.claim();
         })
     );
@@ -243,7 +257,7 @@ self.addEventListener('fetch', event => {
 // ========================================================================
 self.addEventListener('periodicsync', (event) => {
     if (event.tag === 'daily-todo-backup') {
-        console.log('[SW] Periodic Sync triggered for daily-todo-backup.');
+        console.log('[SW] Periodic Sync triggered for "daily-todo-backup".');
         event.waitUntil(handleAutoBackup());
     }
 });
@@ -267,6 +281,39 @@ self.addEventListener('periodicsync', (event) => {
 // 2. 监听来自主应用的消息来安排提醒
 // ========================================================================
 self.addEventListener('message', event => {
+
+    if (!event.data) return;
+
+    if (event.data.action === 'getBackupVersions') {
+        (async () => {
+            try {
+                const keys = await backupDb.getAllKeys();
+                if (event.ports[0]) {
+                    event.ports[0].postMessage({ success: true, versions: keys.sort((a, b) => b - a) });
+                }
+            } catch (error) {
+                if (event.ports[0]) {
+                    event.ports[0].postMessage({ success: false, message: error.message });
+                }
+            }
+        })();
+    } else if (event.data.action === 'restoreFromBackup') {
+        (async () => {
+            try {
+                const restoredData = await backupDb.get(event.data.timestamp);
+                if (restoredData) {
+                    if (event.ports[0]) {
+                        event.ports[0].postMessage({ success: true, data: restoredData });
+                    }
+                } else {
+                    throw new Error('找不到指定的备份版本。');
+                }
+            } catch (error) {
+                if (event.ports[0]) {
+                    event.ports[0].postMessage({ success: false, message: error.message });
+                }
+            }
+        })();
     if (event.data && event.data.type === 'SCHEDULE_REMINDER') {
         const { task } = event.data.payload;
         if (!task || !task.reminderTime || !task.id) {
@@ -302,54 +349,7 @@ self.addEventListener('message', event => {
         // 更复杂的实现会清除特定的 setTimeout。
         console.log('[SW] Received CANCEL_REMINDER for task ID:', event.data.payload.taskId, '. Notification (if pending via setTimeout) may still fire unless task data is updated/removed.');
     }
-    // --- 【修正】处理获取历史版本列表的请求 ---
-    if (event.data.action === 'getBackupVersions') {
-        (async () => {
-            try {
-                const db = await openBackupDB();
-                const transaction = db.transaction(VERSION_STORE_NAME, 'readonly');
-                const store = transaction.objectStore(VERSION_STORE_NAME);
-                const keys = await promisifyRequest(store.getAllKeys());
-                db.close();
-
-                // 检查通信端口是否存在
-                if (event.ports[0]) {
-                    // 通过端口发回响应
-                    event.ports[0].postMessage({ success: true, versions: keys.sort((a, b) => b - a) });
-                }
-            } catch (error) {
-                if (event.ports[0]) {
-                    event.ports[0].postMessage({ success: false, message: error.message });
-                }
-            }
-        })();
-    }
-
-    // --- 【修正】处理从指定版本恢复的请求 ---
-    if (event.data.action === 'restoreFromBackup') {
-        (async () => {
-            try {
-                const db = await openBackupDB();
-                const transaction = db.transaction(VERSION_STORE_NAME, 'readonly');
-                const store = transaction.objectStore(VERSION_STORE_NAME);
-                const restoredData = await promisifyRequest(store.get(event.data.timestamp));
-                db.close();
-                
-                if (restoredData) {
-                    if (event.ports[0]) {
-                        // 将恢复的数据发送回前端，由前端处理后续操作
-                        event.ports[0].postMessage({ success: true, data: restoredData });
-                    }
-                } else {
-                    throw new Error('找不到指定的备份版本。');
-                }
-            } catch (error) {
-                if (event.ports[0]) {
-                    event.ports[0].postMessage({ success: false, message: error.message });
-                }
-            }
-        })();
-    }
+   
 
     if (event.data && event.data.action === 'skipWaiting') {
         self.skipWaiting();
@@ -361,51 +361,36 @@ const VERSION_STORE_NAME = 'versions';
 const MAX_BACKUPS = 14;
 
 async function handleAutoBackup() {
-    console.log('[BG-Backup] 开始执行每日自动备份...');
+    console.log('[SW-Backup] 开始执行每日自动备份...');
     try {
-        const { tasks } = await chrome.storage.local.get('tasks');
+        // 【核心修复】从主数据库 'EfficienTodoDB' 读取数据
+        const tasks = await mainDb.get('allTasks');
+        
+        // 如果数据为空或不包含任务，则跳过
         if (!tasks || (!tasks.daily?.length && !tasks.monthly?.length)) {
-            console.log('[BG-Backup] 数据为空，跳过本次备份。');
+            console.log('[SW-Backup] 主数据为空，跳过本次备份。');
             return;
         }
 
-        const db = await openBackupDB();
-        const transaction = db.transaction(VERSION_STORE_NAME, 'readwrite');
-        const store = transaction.objectStore(VERSION_STORE_NAME);
-
-        // 存储当前快照，使用时间戳作为key
         const timestamp = Date.now();
-        store.put(tasks, timestamp);
-
-        // 清理旧的备份（保留策略）
-        const allKeysRequest = store.getAllKeys();
-        allKeysRequest.onsuccess = () => {
-            const keys = allKeysRequest.result;
-            if (keys.length > MAX_BACKUPS) {
-                keys.sort((a, b) => a - b); // 排序，最旧的在前
-                const keysToDelete = keys.slice(0, keys.length - MAX_BACKUPS);
-                keysToDelete.forEach(key => {
-                    store.delete(key);
-                    console.log(`[BG-Backup] 已删除旧的备份快照: ${new Date(key).toLocaleString()}`);
-                });
+        // 【核心修复】将数据写入备份数据库 'EfficienTodo_Backups'
+        await backupDb.set(timestamp, tasks);
+        console.log(`[SW-Backup] 成功创建新的备份快照: ${new Date(timestamp).toLocaleString()}`);
+        
+        // 清理旧的备份
+        const allKeys = await backupDb.getAllKeys();
+        if (allKeys.length > MAX_BACKUPS) {
+            allKeys.sort((a, b) => a - b);
+            const keysToDelete = allKeys.slice(0, allKeys.length - MAX_BACKUPS);
+            for (const key of keysToDelete) {
+                await backupDb.delete(key);
+                console.log(`[SW-Backup] 已删除旧的备份快照: ${new Date(key).toLocaleString()}`);
             }
-        };
-
-        transaction.oncomplete = () => {
-            console.log(`[BG-Backup] 成功创建新的备份快照: ${new Date(timestamp).toLocaleString()}`);
-            db.close();
-        };
-        transaction.onerror = () => {
-            console.error('[BG-Backup] 备份事务执行失败。');
-            db.close();
-        };
-
+        }
     } catch (error) {
-        console.error('[BG-Backup] 自动备份过程中发生错误:', error);
+        console.error('[SW-Backup] 自动备份过程中发生错误:', error);
     }
 }
-
-
 
 // ========================================================================
 // 3. 核心：本地通知检查与显示逻辑 (重构)
