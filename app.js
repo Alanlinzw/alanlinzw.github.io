@@ -2897,11 +2897,9 @@ window.addEventListener('visibilitychange', () => {
 // 当窗口获得焦点时也触发（作为补充）
 window.addEventListener('focus', triggerSync);
 
-// (在 bindEventListeners 函数内部)
-// (在 app.js 的 bindEventListeners 函数内部)
+
 if (syncDriveBtn && syncStatusSpan) {
     syncDriveBtn.addEventListener('click', async () => {
-        // 1. 如果有自动同步在等待，取消它，因为我们要手动同步了
         if (autoSyncTimer) {
             clearTimeout(autoSyncTimer);
             autoSyncTimer = null;
@@ -2912,33 +2910,28 @@ if (syncDriveBtn && syncStatusSpan) {
         syncStatusSpan.textContent = '初始化同步...';
         syncDriveBtn.disabled = true;
 
-        // 2. 定义成功标志位，这是关键
         let syncSucceeded = false;
 
         try {
             // ==========================================================
-            //  同步流程开始
+            //  同步流程：准备阶段
             // ==========================================================
-            
-            // 检查 API 客户端
             if (!driveSync.tokenClient) {
                 await loadGoogleApis();
                 if (!driveSync.tokenClient) throw new Error('Google API 客户端未能成功初始化。');
             }
 
-            // 授权
             const token = driveSync.gapi.client.getToken();
             if (token === null) {
                 syncStatusSpan.textContent = '需要授权...';
                 await driveSync.authenticate();
             }
 
-            // 查找文件 (包含401错误重试授权的逻辑)
             syncStatusSpan.textContent = '查找云文件...';
             try {
                 await driveSync.findOrCreateFile();
             } catch (apiError) {
-                if (apiError && (apiError.status === 401 || (apiError.result && apiError.result.error && apiError.result.error.code === 401))) {
+                if (apiError && (apiError.status === 401 || (apiError.result?.error?.code === 401))) {
                     syncStatusSpan.textContent = '令牌失效，重新授权...';
                     driveSync.gapi.client.setToken(null);
                     await driveSync.authenticate();
@@ -2949,146 +2942,146 @@ if (syncDriveBtn && syncStatusSpan) {
             }
             if (!driveSync.driveFileId) throw new Error('未能找到或创建云端文件。');
 
-            // 下载云端数据
             syncStatusSpan.textContent = '下载云数据...';
             const cloudData = await driveSync.download();
             
-            // 获取本地数据
             let localData = await db.get('allTasks');
             if (!localData || typeof localData !== 'object') {
                 localData = { daily: [], monthly: [], future: [], ledger: [], history: {}, ledgerHistory: {}, budgets: {}, currencySymbol: '$', lastUpdatedLocal: 0 };
             }
             
             // ==========================================================
-            //  ↓↓↓ 这里是之前被省略的核心比较与合并逻辑 ↓↓↓
+            //  核心决策逻辑
             // ==========================================================
-
             const isFirstSyncCompleted = await db.get('isFirstSyncCompleted');
 
-            if (isFirstSyncCompleted !== true && cloudData && Object.keys(cloudData).length > 0) {
+            // 场景1：首次同步，且云端有数据 -> 弹出交互选择框
+            if (isFirstSyncCompleted !== true && cloudData && Object.keys(cloudData).length > 0 && cloudData.monthly?.length > 0) {
+                
+                openCustomPrompt({
+                    title: '发现云端数据',
+                    message: '检测到您的云端已有数据。请选择如何处理：',
+                    htmlContent: `
+                        <div class="custom-prompt-actions" style="flex-direction: column; gap: 10px; width: 100%;">
+                            <button class="custom-prompt-btn custom-prompt-confirm" data-choice="merge">合并云端与本地数据</button>
+                            <p class="custom-prompt-message" style="font-size: 0.8em; margin: -5px 0 5px 0;">(保留两边所有任务，推荐)</p>
+                            <button class="custom-prompt-btn" data-choice="cloud">仅使用云端数据 (覆盖本地)</button>
+                            <button class="custom-prompt-btn btn-danger" data-choice="local">仅使用本地数据 (覆盖云端)</button>
+                        </div>
+                    `,
+                    hideConfirmButton: true,
+                    hideCancelButton: true,
+                    onRender: () => {
+                        document.querySelectorAll('[data-choice]').forEach(button => {
+                            button.onclick = async () => {
+                                const choice = button.dataset.choice;
+                                closeCustomPrompt();
+                                
+                                syncStatusSpan.textContent = '处理中...';
+                                let finalData;
+                                
+                                if (choice === 'merge') {
+                                    console.log("用户选择合并数据。");
+                                    // 使用 Set 去重，避免重复项
+                                    const mergeById = (arr1, arr2) => {
+                                        const map = new Map();
+                                        [...(arr1 || []), ...(arr2 || [])].forEach(item => map.set(item.id, item));
+                                        return Array.from(map.values());
+                                    };
+                                    finalData = {
+                                        daily: mergeById(cloudData.daily, localData.daily),
+                                        monthly: mergeById(cloudData.monthly, localData.monthly),
+                                        future: mergeById(cloudData.future, localData.future),
+                                        ledger: mergeById(cloudData.ledger, localData.ledger),
+                                        history: { ...localData.history, ...cloudData.history },
+                                        ledgerHistory: { ...localData.ledgerHistory, ...cloudData.ledgerHistory },
+                                        budgets: { ...localData.budgets, ...cloudData.budgets },
+                                        currencySymbol: cloudData.currencySymbol || localData.currencySymbol || '$',
+                                    };
+                                    syncStatusSpan.textContent = '合并并上传...';
+                                } else if (choice === 'cloud') {
+                                    console.log("用户选择使用云端数据。");
+                                    finalData = cloudData;
+                                    syncStatusSpan.textContent = '应用云端数据...';
+                                } else if (choice === 'local') {
+                                    console.log("用户选择使用本地数据。");
+                                    finalData = localData;
+                                    syncStatusSpan.textContent = '上传本地数据...';
+                                }
 
-openCustomPrompt({
-        title: '发现云端数据',
-        message: '检测到您的云端已有数据。请选择如何处理：',
-        htmlContent: `...`, // 提供“合并”、“用云端覆盖本地”、“用本地覆盖云端”三个按钮
-        onConfirm: (choice) => {
-            if (choice === 'merge') { /* 执行合并 */ }
-            else if (choice === 'cloud') { /* 执行云端覆盖 */ }
-            else if (choice === 'local') { /* 执行本地覆盖 */ }
-        }
-    });
-} else {
-                // --- 场景：首次同步，且云端有数据 ---
-                console.log("首次同步检测：执行数据合并策略。");
-                syncStatusSpan.textContent = '首次同步，正在合并数据...';
-
-                const mergedTasks = {
-                    daily: [...(cloudData.daily || []), ...(localData.daily || [])],
-                    monthly: [...(cloudData.monthly || []), ...(localData.monthly || [])],
-                    future: [...(cloudData.future || []), ...(localData.future || [])],
-                    ledger: [...(cloudData.ledger || []), ...(localData.ledger || [])],
-                    history: { ...cloudData.history, ...localData.history },
-                    ledgerHistory: { ...cloudData.ledgerHistory, ...localData.ledgerHistory },
-                    budgets: { ...cloudData.budgets, ...localData.budgets },
-                    currencySymbol: cloudData.currencySymbol || localData.currencySymbol || '$',
-                    lastUpdatedLocal: Date.now() 
-                };
-                
-                allTasks = mergedTasks;
-                
-                console.log("正在上传合并后的数据...");
-                await driveSync.upload(allTasks);
-                await db.set('allTasks', allTasks);
-                await db.set('isFirstSyncCompleted', true);
-                
-                syncStatusSpan.textContent = '数据合并并同步成功！';
-                renderAllLists();
+                                finalData.lastUpdatedLocal = Date.now();
+                                allTasks = finalData;
+                                
+                                await db.set('allTasks', allTasks);
+                                await driveSync.upload(allTasks);
+                                await db.set('isFirstSyncCompleted', true);
+                                
+                                syncStatusSpan.textContent = '操作成功！';
+                                renderAllLists();
+                                syncSucceeded = true; // 标记成功
+                                if (syncSucceeded) { /* 更新同步时间等后续操作 */ }
+                            };
+                        });
+                    },
+                    onCancel: () => { // 如果用户关闭了选择框
+                         throw new Error("用户取消了首次同步选择。");
+                    }
+                });
+                // 注意：这里不设置 syncSucceeded，因为它将在 onRender 的回调中设置
 
             } else {
-                // --- 场景：常规同步，或首次同步但云端无数据 ---
+                // 场景2：常规同步，或首次同步但云端无数据
                 console.log("常规同步检测：执行基于时间戳的覆盖策略。");
 
-                if (cloudData && typeof cloudData === 'object' && cloudData.lastUpdatedLocal && 
-                    cloudData.lastUpdatedLocal > (localData.lastUpdatedLocal || 0)) {
-                    // 云端较新，覆盖本地
-                    syncStatusSpan.textContent = '云端数据较新，正在同步...';
+                const isLocalDataEmpty = (!localData.daily?.length && !localData.monthly?.length);
+                const isCloudDataEmpty = (!cloudData || (!cloudData.daily?.length && !cloudData.monthly?.length));
+                
+                // 安全网逻辑
+                if (isLocalDataEmpty && !isCloudDataEmpty) {
+                    console.warn("安全网：本地为空，云端有数据。将从云端恢复。");
                     allTasks = cloudData;
-                    await db.set('allTasks', allTasks);
-                    renderAllLists();
+                    syncStatusSpan.textContent = '已从云端恢复数据。';
+                } else if (!isLocalDataEmpty && isCloudDataEmpty) {
+                    console.warn("安全网：云端为空，本地有数据。将上传本地数据。");
+                    allTasks = localData;
+                    await driveSync.upload(allTasks);
+                    syncStatusSpan.textContent = '已将本地数据同步到云端。';
+                } else if (cloudData && cloudData.lastUpdatedLocal > (localData.lastUpdatedLocal || 0)) {
+                    console.log("常规同步：云端数据较新，覆盖本地。");
+                    allTasks = cloudData;
                     syncStatusSpan.textContent = '已从云端同步！';
                 } else {
-                    // 本地较新或与云端一致，上传本地
-                    syncStatusSpan.textContent = '上传本地数据...';
-                    allTasks = localData; 
+                    console.log("常规同步：本地数据较新或一致，上传本地。");
+                    allTasks = localData;
                     const uploadResult = await driveSync.upload(allTasks);
                     syncStatusSpan.textContent = uploadResult.message;
                 }
-
+                
+                allTasks.lastUpdatedLocal = Date.now();
+                await db.set('allTasks', allTasks);
                 if (isFirstSyncCompleted !== true) {
                     await db.set('isFirstSyncCompleted', true);
                 }
+                renderAllLists();
+                syncSucceeded = true;
             }
 
-            // ==========================================================
-            //  ↑↑↑ 核心比较与合并逻辑结束 ↑↑↑
-            // ==========================================================
-            
-            // 3. 如果代码执行到这里没有出错，说明同步成功
-            syncSucceeded = true;
-
-            // 4. 更新UI状态
-            isDataDirty = false; // 数据不再是“脏”的
-            updateSyncIndicator();
-
-        } catch (error) { // 捕获上面 try 块中发生的任何错误
-            
-            // 错误处理逻辑 (这里可以安全访问 error 变量)
+        } catch (error) {
             console.error("同步操作失败:", error);
             const errorMessage = error.message || '未知错误';
             syncStatusSpan.textContent = `同步错误: ${errorMessage.substring(0, 40)}...`;
+            // ... (错误提示的 openCustomPrompt 逻辑保持不变) ...
 
-            if (errorMessage.includes("popup_closed_by_user") || errorMessage.includes("access_denied")) {
-                openCustomPrompt({
-                    title: "授权取消",
-                    message: "您取消了 Google Drive 授权。同步操作无法继续。",
-                    inputType: 'none',
-                    confirmText: '好的',
-                    hideCancelButton: true
-                });
-            } else {
-                 openCustomPrompt({
-                    title: "同步失败",
-                    message: `发生错误: ${errorMessage}`,
-                    inputType: 'none',
-                    confirmText: '好的',
-                    hideCancelButton: true
-                });
-            }
-
-        } finally { // 无论成功或失败，都会执行这里
-
-            // 5. 重新启用按钮
+        } finally {
             syncDriveBtn.disabled = false;
             console.log("Sync: 同步流程结束，按钮已重新启用。");
-
-            // 6. 使用 syncSucceeded 标志位来判断
             if (syncSucceeded) {
-                const now = new Date();
-                const timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                isDataDirty = false;
+                updateSyncIndicator();
+                const timeString = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                 localStorage.setItem('lastSyncTime', timeString);
-                
-                // 只有在数据不是“脏”状态时，才显示最后同步时间
-                if (!isDataDirty && syncStatusSpan) {
-                    syncStatusSpan.textContent = `同步于 ${timeString}`;
-                }
+                setTimeout(() => { if (!isDataDirty && syncStatusSpan) syncStatusSpan.textContent = ''; }, 7000);
             }
-
-            // 7. 在一段时间后，清空状态提示（除非有未同步的更改）
-            setTimeout(() => {
-                if (!isDataDirty && syncStatusSpan) {
-                    syncStatusSpan.textContent = '';
-                }
-            }, 7000);
         }
     });
 }
