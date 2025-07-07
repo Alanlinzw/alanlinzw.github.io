@@ -3845,30 +3845,24 @@ function hideVersionHistoryModal() {
     }
 }
 
+// 【核心修复】使用 navigator.serviceWorker.ready 和 MessageChannel
 function renderVersionHistory() {
     if (!versionListDiv) return;
     versionListDiv.innerHTML = '<p>正在加载历史版本...</p>';
 
-    // 1. 检查 Service Worker 是否可用
     if (!('serviceWorker' in navigator)) {
         versionListDiv.innerHTML = '<p style="color:var(--color-danger);">浏览器不支持此功能。</p>';
         return;
     }
 
-    // 2. 使用 .ready 来确保我们获取到的是一个已激活的 Service Worker
     navigator.serviceWorker.ready.then(registration => {
-        
-        // 3. 检查 registration 和 active worker 是否存在
         if (!registration || !registration.active) {
             versionListDiv.innerHTML = '<p style="color:var(--color-danger);">后台服务未激活，请刷新页面重试。</p>';
             return;
         }
 
-        // 4. 创建一个 MessageChannel 用于双向通信
-        // 这是从 SW 接收响应的最可靠方式
         const messageChannel = new MessageChannel();
         
-        // 5. 设置消息接收器
         messageChannel.port1.onmessage = (event) => {
             const response = event.data;
             if (response && response.success) {
@@ -3878,7 +3872,7 @@ function renderVersionHistory() {
                     return;
                 }
                 
-                versionListDiv.innerHTML = ''; // 清空加载提示
+                versionListDiv.innerHTML = '';
                 const ul = document.createElement('ul');
                 versions.forEach(timestamp => {
                     const li = document.createElement('li');
@@ -3900,21 +3894,25 @@ function renderVersionHistory() {
                             message: `您确定要将所有数据恢复到 ${dateSpan.textContent} 的状态吗？此操作将覆盖当前数据。`,
                             confirmText: '确认恢复',
                             onConfirm: () => {
-                                // 同样使用安全的方式发送恢复请求
+                                // 【再次使用 MessageChannel 发送恢复请求】
                                 if (registration.active) {
                                     const restoreChannel = new MessageChannel();
                                     restoreChannel.port1.onmessage = (restoreEvent) => {
                                         const restoreResponse = restoreEvent.data;
                                         if (restoreResponse && restoreResponse.success) {
                                             hideVersionHistoryModal();
-                                            // 【重要】后台只负责读取，前端负责写入和刷新
+                                            // **前端负责写入和刷新UI**
                                             allTasks = restoreResponse.data;
-                                            saveTasks().then(renderAllLists);
+                                            // 恢复后更新时间戳
+                                            allTasks.lastUpdatedLocal = Date.now();
+                                            saveTasks().then(() => {
+                                                loadTasks(renderAllLists); // 确保从最新保存的状态重新加载和渲染
+                                            });
                                             setTimeout(() => {
                                                 openCustomPrompt({title: '成功', message: '数据已成功恢复！', inputType: 'none', confirmText: '好的', hideCancelButton: true});
                                             }, 200);
                                         } else {
-                                            openCustomPrompt({title: '失败', message: `恢复失败: ${restoreResponse.message}`, inputType: 'none', confirmText: '好的', hideCancelButton: true});
+                                            openCustomPrompt({title: '失败', message: `恢复失败: ${restoreResponse ? restoreResponse.message : '未知错误'}`, inputType: 'none', confirmText: '好的', hideCancelButton: true});
                                         }
                                     };
                                     registration.active.postMessage({ action: 'restoreFromBackup', timestamp: timestamp }, [restoreChannel.port2]);
@@ -3934,7 +3932,7 @@ function renderVersionHistory() {
             }
         };
 
-        // 6. 发送消息，并将 port2 传递给 Service Worker
+        // 发送消息，并将 port2 传递给 Service Worker
         registration.active.postMessage({ action: 'getBackupVersions' }, [messageChannel.port2]);
 
     }).catch(error => {
