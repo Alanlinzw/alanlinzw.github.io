@@ -3042,6 +3042,44 @@ if (syncDriveBtn && syncStatusSpan) {
         });
     }
 
+// 监听文件选择框的变化，用于恢复
+if (restoreFileInput) {
+    restoreFileInput.addEventListener('change', (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const restoredData = JSON.parse(e.target.result);
+                // 验证数据基本结构
+                if (restoredData && restoredData.monthly && restoredData.daily) {
+                    // 数据看似有效，打开最终确认恢复的模态框
+                    showRestoreConfirmation(restoredData);
+                } else {
+                    throw new Error('文件格式无效或不包含预期数据。');
+                }
+            } catch (error) {
+                openCustomPrompt({
+                    title: '恢复失败',
+                    message: `无法解析备份文件。请确保文件未损坏且格式正确。\n错误: ${error.message}`,
+                    inputType: 'none',
+                    confirmText: '好的',
+                    hideCancelButton: true
+                });
+            }
+        };
+        reader.readAsText(file);
+        // 重置文件输入框，以便下次能选择同一个文件
+        event.target.value = '';
+    });
+}
+
+if (versionHistoryCloseBtn) versionHistoryCloseBtn.addEventListener('click', hideVersionHistoryModal);
+if (versionHistoryModal) versionHistoryModal.addEventListener('click', (e) => {
+    if(e.target === versionHistoryModal) hideVersionHistoryModal();
+});
+
    if (bottomNav) {
         bottomNav.addEventListener('click', (e) => {
             const tab = e.target.closest('.tab-item');
@@ -3714,38 +3752,6 @@ function handleBackup() {
     }
 }
 
-// 监听文件选择框的变化，用于恢复
-if (restoreFileInput) {
-    restoreFileInput.addEventListener('change', (event) => {
-        const file = event.target.files[0];
-        if (!file) return;
-
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            try {
-                const restoredData = JSON.parse(e.target.result);
-                // 验证数据基本结构
-                if (restoredData && restoredData.monthly && restoredData.daily) {
-                    // 数据看似有效，打开最终确认恢复的模态框
-                    showRestoreConfirmation(restoredData);
-                } else {
-                    throw new Error('文件格式无效或不包含预期数据。');
-                }
-            } catch (error) {
-                openCustomPrompt({
-                    title: '恢复失败',
-                    message: `无法解析备份文件。请确保文件未损坏且格式正确。\n错误: ${error.message}`,
-                    inputType: 'none',
-                    confirmText: '好的',
-                    hideCancelButton: true
-                });
-            }
-        };
-        reader.readAsText(file);
-        // 重置文件输入框，以便下次能选择同一个文件
-        event.target.value = '';
-    });
-}
 
 // 显示恢复确认模态框
 function showRestoreConfirmation(restoredData) {
@@ -3824,10 +3830,7 @@ function hideVersionHistoryModal() {
     }
 }
 
-if (versionHistoryCloseBtn) versionHistoryCloseBtn.addEventListener('click', hideVersionHistoryModal);
-if (versionHistoryModal) versionHistoryModal.addEventListener('click', (e) => {
-    if(e.target === versionHistoryModal) hideVersionHistoryModal();
-});
+
 
 function renderVersionHistory() {
     if (!versionListDiv) return;
@@ -3992,6 +3995,11 @@ if (!statsModal) {
     syncStatusSpan = document.getElementById('sync-status'); // 确保在 loadGoogleApis 前获取
     bottomNav = document.querySelector('.bottom-tab-nav');
     allSections = document.querySelectorAll('.section[id]');
+    backupRestoreBtn = document.getElementById('backup-restore-btn');
+    restoreFileInput = document.getElementById('restore-file-input');
+    versionHistoryModal = document.getElementById('version-history-modal');
+    versionHistoryCloseBtn = document.getElementById('version-history-close-btn');
+    versionListDiv = document.getElementById('version-list');
     
     console.log("initializeApp: 所有 DOM 元素已获取。");
 
