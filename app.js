@@ -427,30 +427,22 @@ async function loadTasks(callback) {
         data = await db.get('allTasks');
     } catch (error) {
         console.error("[PWA] Error loading tasks from DB:", error);
-        allTasks = { daily: [], monthly: [], future: [], ledger: [], history: {}, ledgerHistory: {}, budgets: {}, currencySymbol: '$', lastUpdatedLocal: Date.now() };
+        allTasks = { daily: [], monthly: [], future: [], ledger: [], history: {}, ledgerHistory: {}, budgets: {}, currencySymbol: '$', lastUpdatedLocal: 0, lastDailyResetDate: '1970-01-01' };
         await saveTasks();
         if (callback) callback();
         return;
     }
     
-    let needsSaveAfterLoad = false;
     if (data && typeof data === 'object') {
         allTasks = data;
-        // console.log("[PWA] Tasks loaded from DB. Timestamp:", allTasks.lastUpdatedLocal ? new Date(allTasks.lastUpdatedLocal).toLocaleString() : 'N/A');
-        const defaultStructure = { daily: [], monthly: [], future: [], ledger: [], history: {}, ledgerHistory: {}, budgets: {}, currencySymbol: '$', lastUpdatedLocal: 0 };
+        const defaultStructure = { daily: [], monthly: [], future: [], ledger: [], history: {}, ledgerHistory: {}, budgets: {}, currencySymbol: '$', lastUpdatedLocal: 0, lastDailyResetDate: '1970-01-01' };
         for (const key in defaultStructure) {
-            if (!allTasks.hasOwnProperty(key) || allTasks[key] === undefined) {
+            if (!allTasks.hasOwnProperty(key)) {
                 allTasks[key] = defaultStructure[key];
-                needsSaveAfterLoad = true;
             }
         }
     } else {
-        console.log("[PWA] No tasks data found in DB or data is not an object. Initializing.");
-        allTasks = { daily: [], monthly: [], future: [], ledger: [], history: {}, ledgerHistory: {}, budgets: {}, currencySymbol: '$', lastUpdatedLocal: Date.now() };
-        needsSaveAfterLoad = true;
-    }
-
-    if (needsSaveAfterLoad) {
+        allTasks = { daily: [], monthly: [], future: [], ledger: [], history: {}, ledgerHistory: {}, budgets: {}, currencySymbol: '$', lastUpdatedLocal: 0, lastDailyResetDate: '1970-01-01' };
         await saveTasks();
     }
     if (callback) callback();
@@ -458,8 +450,8 @@ async function loadTasks(callback) {
 
 async function saveTasks() {
     allTasks.lastUpdatedLocal = Date.now();
-    isDataDirty = true; // 标记数据为“脏”
-    updateSyncIndicator(); // 更新UI提示
+    isDataDirty = true;
+    updateSyncIndicator();
     try {
         await db.set('allTasks', allTasks);
         triggerAutoSync();
@@ -3026,7 +3018,29 @@ if (syncDriveBtn && syncStatusSpan) {
         }
     });
 }
-
+// 【新增】绑定备份与恢复的事件
+    if (backupRestoreBtn) {
+        backupRestoreBtn.addEventListener('click', () => {
+            openCustomPrompt({
+                title: '备份与恢复',
+                message: '您可以下载完整备份文件，或从每日自动快照中恢复。',
+                htmlContent: `
+                    <div class="custom-prompt-actions" style="flex-direction: column; gap: 10px;">
+                        <button id="backup-btn" class="custom-prompt-btn custom-prompt-confirm">备份当前数据到文件</button>
+                        <button id="restore-btn" class="custom-prompt-btn">从文件恢复...</button>
+                        <button id="view-history-btn" class="custom-prompt-btn">查看历史快照...</button>
+                    </div>
+                `,
+                hideConfirmButton: true,
+                hideCancelButton: true,
+                onRender: () => {
+                    document.getElementById('backup-btn').onclick = () => { handleBackup(); closeCustomPrompt(); };
+                    document.getElementById('restore-btn').onclick = () => { closeCustomPrompt(); restoreFileInput.click(); };
+                    document.getElementById('view-history-btn').onclick = () => { closeCustomPrompt(); showVersionHistoryModal(); };
+                }
+            });
+        });
+    }
 
    if (bottomNav) {
         bottomNav.addEventListener('click', (e) => {
@@ -3676,6 +3690,208 @@ function setupStatsTimespanSelectors() {
 // ========================================================================
 // 统计分析图表功能结束
 // ========================================================================
+
+// 备份功能
+function handleBackup() {
+    // 使用 allTasks 全局变量，它包含了所有最新的数据
+    const dataToBackup = JSON.stringify(allTasks, null, 2); // 格式化JSON，增加可读性
+    const blob = new Blob([dataToBackup], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    
+    const today = new Date();
+    const dateString = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    a.href = url;
+    a.download = `efficienTodo_backup_${dateString}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    if (syncStatusSpan) {
+        syncStatusSpan.textContent = '备份文件已下载！';
+        setTimeout(() => { syncStatusSpan.textContent = ''; }, 5000);
+    }
+}
+
+// 监听文件选择框的变化，用于恢复
+if (restoreFileInput) {
+    restoreFileInput.addEventListener('change', (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const restoredData = JSON.parse(e.target.result);
+                // 验证数据基本结构
+                if (restoredData && restoredData.monthly && restoredData.daily) {
+                    // 数据看似有效，打开最终确认恢复的模态框
+                    showRestoreConfirmation(restoredData);
+                } else {
+                    throw new Error('文件格式无效或不包含预期数据。');
+                }
+            } catch (error) {
+                openCustomPrompt({
+                    title: '恢复失败',
+                    message: `无法解析备份文件。请确保文件未损坏且格式正确。\n错误: ${error.message}`,
+                    inputType: 'none',
+                    confirmText: '好的',
+                    hideCancelButton: true
+                });
+            }
+        };
+        reader.readAsText(file);
+        // 重置文件输入框，以便下次能选择同一个文件
+        event.target.value = '';
+    });
+}
+
+// 显示恢复确认模态框
+function showRestoreConfirmation(restoredData) {
+    // 创建一个简单的数据预览
+    const previewHtml = `
+        <h4>将要恢复的数据预览：</h4>
+        <ul>
+            <li>每日清单: ${restoredData.daily?.length || 0} 条</li>
+            <li>本月待办: ${restoredData.monthly?.length || 0} 条</li>
+            <li>未来计划: ${restoredData.future?.length || 0} 条</li>
+            <li>记账本: ${restoredData.ledger?.length || 0} 条</li>
+            <li>历史归档月份: ${Object.keys(restoredData.history || {}).length} 个</li>
+        </ul>
+        <p style="color: var(--color-danger); font-weight: bold;">警告：此操作不可逆，将完全覆盖您当前的所有数据！</p>
+        <div class="custom-prompt-input-area" style="margin-top: 1rem;">
+            <label for="restore-confirm-input">请输入“<b id="confirm-keyword">恢复</b>”以确认：</label>
+            <input type="text" id="restore-confirm-input" placeholder="输入确认词" autocomplete="off">
+        </div>
+    `;
+
+    openCustomPrompt({
+        title: '确认恢复数据',
+        htmlContent: previewHtml,
+        confirmText: '确认恢复',
+        onRender: () => {
+            const confirmInput = document.getElementById('restore-confirm-input');
+            const confirmBtn = document.getElementById('custom-prompt-confirm-btn');
+            const confirmKeyword = document.getElementById('confirm-keyword').textContent;
+
+            // 默认禁用确认按钮
+            confirmBtn.disabled = true;
+
+            confirmInput.addEventListener('input', () => {
+                if (confirmInput.value.trim() === confirmKeyword) {
+                    confirmBtn.disabled = false;
+                    confirmBtn.classList.add('btn-danger'); // 可选：给按钮添加危险样式
+                } else {
+                    confirmBtn.disabled = true;
+                    confirmBtn.classList.remove('btn-danger');
+                }
+            });
+        },
+        onConfirm: () => {
+            // 执行最终的恢复操作
+            // 确保 lastUpdatedLocal 时间戳是最新的，以防止恢复后被旧的云端数据覆盖
+            restoredData.lastUpdatedLocal = Date.now();
+            allTasks = restoredData; // 直接用恢复的数据替换全局变量
+            saveTasks(); // 保存到本地存储
+            renderAllLists(); // 刷新UI
+            
+            // 给出成功提示
+            setTimeout(() => {
+                openCustomPrompt({
+                    title: '恢复成功',
+                    message: '数据已成功恢复！您可以选择性地点击“云同步”按钮，将这个状态同步到云端。',
+                    inputType: 'none',
+                    confirmText: '完成',
+                    hideCancelButton: true
+                });
+            }, 100); // 延迟一点，确保上一个prompt已关闭
+            return true; // 确认关闭当前prompt
+        }
+    });
+}
+
+// 【新增】版本历史相关函数
+function showVersionHistoryModal() {
+    if (!versionHistoryModal) return;
+    renderVersionHistory();
+    versionHistoryModal.classList.remove('hidden');
+}
+
+function hideVersionHistoryModal() {
+    if (versionHistoryModal) {
+        versionHistoryModal.classList.add('hidden');
+    }
+}
+
+if (versionHistoryCloseBtn) versionHistoryCloseBtn.addEventListener('click', hideVersionHistoryModal);
+if (versionHistoryModal) versionHistoryModal.addEventListener('click', (e) => {
+    if(e.target === versionHistoryModal) hideVersionHistoryModal();
+});
+
+function renderVersionHistory() {
+    if (!versionListDiv) return;
+    versionListDiv.innerHTML = '<p>正在加载历史版本...</p>';
+
+    navigator.serviceWorker.controller.postMessage({ action: 'getBackupVersions' }, (response) => {
+        if (response && response.success) {
+            const versions = response.versions;
+            if (versions.length === 0) {
+                versionListDiv.innerHTML = '<p>暂无自动备份的历史快照。</p>';
+                return;
+            }
+            
+            versionListDiv.innerHTML = ''; // 清空加载提示
+            const ul = document.createElement('ul');
+            versions.forEach(timestamp => {
+                const li = document.createElement('li');
+                li.className = 'version-item'; // 自定义样式
+                
+                const dateSpan = document.createElement('span');
+                dateSpan.textContent = new Date(timestamp).toLocaleString('zh-CN', { 
+                    year: 'numeric', month: '2-digit', day: '2-digit', 
+                    hour: '2-digit', minute: '2-digit' 
+                });
+
+                const applyBtn = document.createElement('button');
+                applyBtn.textContent = '应用此版本';
+                applyBtn.className = 'header-action-btn-small';
+
+                applyBtn.onclick = () => {
+                    openCustomPrompt({
+                        title: '确认恢复',
+                        message: `您确定要将所有数据恢复到 ${dateSpan.textContent} 的状态吗？此操作将覆盖当前数据。`,
+                        confirmText: '确认恢复',
+                        onConfirm: () => {
+                            // 发送恢复请求到后台
+                            navigator.serviceWorker.controller.postMessage({ action: 'restoreFromBackup', timestamp: timestamp }, (restoreResponse) => {
+                                if (restoreResponse && restoreResponse.success) {
+                                    hideVersionHistoryModal();
+                                    loadTasks(renderAllLists); // 重新加载数据并刷新UI
+                                    setTimeout(() => {
+                                        openCustomPrompt({title: '成功', message: '数据已成功恢复！', inputType: 'none', confirmText: '好的', hideCancelButton: true});
+                                    }, 200);
+                                } else {
+                                    // 显示错误
+                                    openCustomPrompt({title: '失败', message: `恢复失败: ${restoreResponse.message}`, inputType: 'none', confirmText: '好的', hideCancelButton: true});
+                                }
+                            });
+                        }
+                    });
+                };
+
+                li.appendChild(dateSpan);
+                li.appendChild(applyBtn);
+                ul.appendChild(li);
+            });
+            versionListDiv.appendChild(ul);
+
+        } else {
+            versionListDiv.innerHTML = `<p style="color:var(--color-danger);">加载失败: ${response.message}</p>`;
+        }
+    });
+}
+
 
 async function initializeApp() {
     console.log("initializeApp: 开始应用初始化。");
