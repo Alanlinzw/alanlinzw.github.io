@@ -310,31 +310,38 @@ self.addEventListener('message', event => {
                 const store = tx.objectStore(VERSION_STORE_NAME);
                 const keys = await promisifyRequest(store.getAllKeys());
                 dbHandle.close();
-                event.source.postMessage({ type: 'backupVersionsResponse', success: true, versions: keys.sort((a, b) => b - a) });
+                if (event.ports[0]) {
+                    event.ports[0].postMessage({ success: true, versions: keys.sort((a, b) => b - a) });
+                }
             } catch (error) {
-                event.source.postMessage({ type: 'backupVersionsResponse', success: false, message: error.message });
+                if (event.ports[0]) {
+                    event.ports[0].postMessage({ success: false, message: error.message });
+                }
             }
         })();
     }
 
-    if (event.data && event.data.action === 'restoreFromBackup') {
+    if (event.data.action === 'restoreFromBackup') {
         (async () => {
             try {
-                const dbHandle = await openBackupDB();
-                const tx = dbHandle.transaction(VERSION_STORE_NAME, 'readonly');
-                const store = tx.objectStore(VERSION_STORE_NAME);
+                const db = await openBackupDB();
+                const transaction = db.transaction(VERSION_STORE_NAME, 'readonly');
+                const store = transaction.objectStore(VERSION_STORE_NAME);
                 const restoredData = await promisifyRequest(store.get(event.data.timestamp));
-                dbHandle.close();
+                db.close();
                 
                 if (restoredData) {
-                    // **关键**: 在这里，我们不直接修改本地存储。
-                    // 我们把数据发回给 app.js，由它来完成最后的写入和UI刷新。
-                    event.source.postMessage({ type: 'restoreDataResponse', success: true, data: restoredData });
+                    // 【核心修改】将数据通过 port 发回给前端
+                    if (event.ports[0]) {
+                        event.ports[0].postMessage({ success: true, data: restoredData });
+                    }
                 } else {
                     throw new Error('找不到指定的备份版本。');
                 }
             } catch (error) {
-                event.source.postMessage({ type: 'restoreDataResponse', success: false, message: error.message });
+                if (event.ports[0]) {
+                    event.ports[0].postMessage({ success: false, message: error.message });
+                }
             }
         })();
     }
