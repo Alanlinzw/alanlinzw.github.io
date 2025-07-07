@@ -408,32 +408,33 @@ async function handleAutoBackup() {
 // ========================================================================
 
 async function checkAndShowNotifications() {
-    console.log('[SW] checkAndShowNotifications called.');
+    console.log('[SW] checkAndShowNotifications called (optimized version).');
     try {
-        // 使用 mainDb 帮助库来获取主数据
-        const allTasksData = await mainDb.get('allTasks');
+        // 1. 【修改】只读取轻量级的 futureTasksForSW
+        const futureTasks = await mainDb.get('futureTasksForSW'); 
         
-        if (!allTasksData || !allTasksData.future || !Array.isArray(allTasksData.future)) {
+        if (!futureTasks || !Array.isArray(futureTasks) || futureTasks.length === 0) {
+            // console.log('[SW] No future tasks to check.');
             return;
         }
         
-        const allTasks = JSON.parse(JSON.stringify(allTasksData)); 
         const now = Date.now();
         const dueTasks = [];
-        const remainingFutureTasks = [];
 
-        allTasks.future.forEach(task => {
+        // 2. 找出所有到期的任务
+        futureTasks.forEach(task => {
             if (task.reminderTime && task.reminderTime <= now) {
                 dueTasks.push(task);
-            } else {
-                remainingFutureTasks.push(task);
             }
         });
         
         if (dueTasks.length > 0) {
-            allTasks.future = remainingFutureTasks;
+            console.log(`[SW] Found ${dueTasks.length} due tasks for notification.`);
 
+            // 3. 遍历到期任务，显示通知并向所有客户端发送消息
             for (const task of dueTasks) {
+                // a. 显示系统通知
+                console.log(`[SW] Showing notification for: ${task.text}`);
                 if (self.registration && typeof self.registration.showNotification === 'function') {
                     await self.registration.showNotification('高效待办清单提醒', {
                         body: task.text,
@@ -442,33 +443,29 @@ async function checkAndShowNotifications() {
                         data: { url: self.registration.scope + '#future-section', taskId: task.id }
                     });
                 }
-                
-                if (!allTasks.daily.some(d => d.originalFutureId === task.id)) {
-                    allTasks.daily.unshift({
-                        id: `daily_${Date.now()}_${Math.random().toString(36).substr(2,5)}`,
-                        text: `[计划] ${task.text}`,
-                        completed: false,
-                        note: task.progressText || task.note || '',
-                        links: task.links || [],
-                        originalFutureId: task.id,
-                        fromFuture: true // 标记来源
+
+                // b. 【核心修改】向所有受控的客户端发送 TASK_DUE 消息
+                //    让客户端自己去处理数据的移动
+                const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+                clients.forEach(client => {
+                    client.postMessage({
+                        type: 'TASK_DUE',
+                        payload: { taskId: task.id }
                     });
-                }
+                });
             }
-            
-            // 【重要】将更新后的数据写回主数据库，而不是备份数据库
-            allTasks.lastUpdatedLocal = Date.now();
-            const mainDbWrite = await createStore('EfficienTodoDB', 'data');
-            const tx = mainDbWrite.transaction('data', 'readwrite');
-            await promisifyRequest(tx.objectStore('data').put(allTasks, 'allTasks'));
-            mainDbWrite.close();
-            console.log('[SW] 到期任务处理完毕，主数据已更新。');
+
+            // c. 【核心修改】SW不再直接修改主数据。
+            //    它只需要从 futureTasksForSW 中移除已处理的任务即可。
+            //    这可以等到 app.js 下次保存时自动更新，或者在这里也更新一下。
+            //    为了简单和安全，我们让 app.js 的下一次 saveTasks 来更新 futureTasksForSW。
+            console.log('[SW] Notifications shown and TASK_DUE messages sent to clients.');
+
         }
     } catch (error) {
-        console.error("[SW] 检查或显示通知时出错:", error);
+        console.error("[SW] Error checking/showing notifications (optimized):", error);
     }
 }
-
 
 // ========================================================================
 // 4. 通知点击事件处理
