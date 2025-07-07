@@ -1,4 +1,4 @@
-// ========================================================================
+、// ========================================================================
 // app.js (PWA 完整重构版)
 // ========================================================================
 
@@ -3944,19 +3944,16 @@ function renderVersionHistory() {
                             message: `您确定要将所有数据恢复到 ${dateSpan.textContent} 的状态吗？此操作将覆盖当前数据。`,
                             confirmText: '确认恢复',
                             onConfirm: () => {
-                                // 【再次使用 MessageChannel 发送恢复请求】
                                 if (registration.active) {
                                     const restoreChannel = new MessageChannel();
                                     restoreChannel.port1.onmessage = (restoreEvent) => {
                                         const restoreResponse = restoreEvent.data;
                                         if (restoreResponse && restoreResponse.success) {
                                             hideVersionHistoryModal();
-                                            // **前端负责写入和刷新UI**
                                             allTasks = restoreResponse.data;
-                                            // 恢复后更新时间戳
                                             allTasks.lastUpdatedLocal = Date.now();
                                             saveTasks().then(() => {
-                                                loadTasks(renderAllLists); // 确保从最新保存的状态重新加载和渲染
+                                                loadTasks(renderAllLists);
                                             });
                                             setTimeout(() => {
                                                 openCustomPrompt({title: '成功', message: '数据已成功恢复！', inputType: 'none', confirmText: '好的', hideCancelButton: true});
@@ -3982,7 +3979,6 @@ function renderVersionHistory() {
             }
         };
 
-        // 发送消息，并将 port2 传递给 Service Worker
         registration.active.postMessage({ action: 'getBackupVersions' }, [messageChannel.port2]);
 
     }).catch(error => {
@@ -3990,8 +3986,6 @@ function renderVersionHistory() {
         versionListDiv.innerHTML = `<p style="color:var(--color-danger);">无法连接到后台服务: ${error.message}</p>`;
     });
 }
-
-
 async function initializeApp() {
     console.log("initializeApp: 开始应用初始化。");
 statsModal = document.getElementById('stats-modal'); // 确保这行存在且正确
