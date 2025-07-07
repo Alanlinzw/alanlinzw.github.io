@@ -302,15 +302,19 @@ self.addEventListener('message', event => {
         // 更复杂的实现会清除特定的 setTimeout。
         console.log('[SW] Received CANCEL_REMINDER for task ID:', event.data.payload.taskId, '. Notification (if pending via setTimeout) may still fire unless task data is updated/removed.');
     }
-     if (event.data && event.data.action === 'getBackupVersions') {
+    // --- 【修正】处理获取历史版本列表的请求 ---
+    if (event.data.action === 'getBackupVersions') {
         (async () => {
             try {
-                const dbHandle = await openBackupDB();
-                const tx = dbHandle.transaction(VERSION_STORE_NAME, 'readonly');
-                const store = tx.objectStore(VERSION_STORE_NAME);
+                const db = await openBackupDB();
+                const transaction = db.transaction(VERSION_STORE_NAME, 'readonly');
+                const store = transaction.objectStore(VERSION_STORE_NAME);
                 const keys = await promisifyRequest(store.getAllKeys());
-                dbHandle.close();
+                db.close();
+
+                // 检查通信端口是否存在
                 if (event.ports[0]) {
+                    // 通过端口发回响应
                     event.ports[0].postMessage({ success: true, versions: keys.sort((a, b) => b - a) });
                 }
             } catch (error) {
@@ -321,6 +325,7 @@ self.addEventListener('message', event => {
         })();
     }
 
+    // --- 【修正】处理从指定版本恢复的请求 ---
     if (event.data.action === 'restoreFromBackup') {
         (async () => {
             try {
@@ -331,8 +336,8 @@ self.addEventListener('message', event => {
                 db.close();
                 
                 if (restoredData) {
-                    // 【核心修改】将数据通过 port 发回给前端
                     if (event.ports[0]) {
+                        // 将恢复的数据发送回前端，由前端处理后续操作
                         event.ports[0].postMessage({ success: true, data: restoredData });
                     }
                 } else {
@@ -344,6 +349,10 @@ self.addEventListener('message', event => {
                 }
             }
         })();
+    }
+
+    if (event.data && event.data.action === 'skipWaiting') {
+        self.skipWaiting();
     }
 });
 
