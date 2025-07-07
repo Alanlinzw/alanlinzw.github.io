@@ -468,8 +468,19 @@ async function saveTasks() {
     isDataDirty = true;
     updateSyncIndicator();
     try {
+  // 【修改开始】
+        // 1. 正常保存完整的 allTasks 对象
         await db.set('allTasks', allTasks);
+
+        // 2. 额外保存一份只包含 future 任务的列表，供 Service Worker 轻量读取
+        // 确保 allTasks.future 是一个数组，即使是空数组
+        const futureTasksToSave = allTasks.future || [];
+        await db.set('futureTasksForSW', futureTasksToSave); 
+        console.log('[PWA] a_future_tasks_for_sw saved to DB with', futureTasksToSave.length, 'items.');
+        
+        // 3. 触发自动同步（保持不变）
         triggerAutoSync();
+        // 【修改结束】
     } catch (error) {
         console.error('[PWA] Error saving tasks to DB:', error);
     }
@@ -515,7 +526,43 @@ function switchView(targetId) {
     window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
+async function handleTaskDue(dueTaskId) {
+    if (!allTasks || !allTasks.future || !dueTaskId) return;
 
+    let taskMoved = false;
+    const remainingFutureTasks = [];
+    
+    // 找到并移动任务
+    allTasks.future.forEach(task => {
+        if (task.id === dueTaskId) {
+            console.log(`[PWA] Moving due task "${task.text}" to daily list.`);
+            if (!allTasks.daily) allTasks.daily = [];
+            
+            // 检查是否已存在（以防SW多次发送消息）
+            if (!allTasks.daily.some(d => d.originalFutureId === task.id)) {
+                allTasks.daily.unshift({
+                    id: `daily_${Date.now()}_${Math.random().toString(36).substr(2,5)}`,
+                    text: `[计划] ${task.text}`,
+                    completed: false,
+                    note: task.progressText || task.note || '',
+                    links: task.links || [],
+                    originalFutureId: task.id,
+                    fromFuture: true
+                });
+                taskMoved = true;
+            }
+        } else {
+            remainingFutureTasks.push(task);
+        }
+    });
+
+    if (taskMoved) {
+        allTasks.future = remainingFutureTasks;
+        // 保存更改并刷新UI
+        await saveTasks();
+        renderAllLists();
+    }
+}
 function openModal(modalElement) { if (modalElement) modalElement.classList.remove('hidden'); }
 function closeModal(modalElement) { if (modalElement) modalElement.classList.add('hidden'); }
 function applyTheme(theme) { document.documentElement.setAttribute('data-theme', theme); currentTheme = theme; }
@@ -2919,6 +2966,18 @@ if (syncDriveBtn && syncStatusSpan) {
             const isFirstSyncCompleted = await db.get('isFirstSyncCompleted');
 
             if (isFirstSyncCompleted !== true && cloudData && Object.keys(cloudData).length > 0) {
+
+openCustomPrompt({
+        title: '发现云端数据',
+        message: '检测到您的云端已有数据。请选择如何处理：',
+        htmlContent: `...`, // 提供“合并”、“用云端覆盖本地”、“用本地覆盖云端”三个按钮
+        onConfirm: (choice) => {
+            if (choice === 'merge') { /* 执行合并 */ }
+            else if (choice === 'cloud') { /* 执行云端覆盖 */ }
+            else if (choice === 'local') { /* 执行本地覆盖 */ }
+        }
+    });
+} else {
                 // --- 场景：首次同步，且云端有数据 ---
                 console.log("首次同步检测：执行数据合并策略。");
                 syncStatusSpan.textContent = '首次同步，正在合并数据...';
@@ -4138,7 +4197,18 @@ try {
     } else {
         console.log('Periodic Background Sync not supported in this browser. Fallback to activate/startup checks.');
     }
-
+// 【新增】监听来自 Service Worker 的消息
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.addEventListener('message', event => {
+            if (event.data && event.data.type === 'TASK_DUE') {
+                console.log('[PWA] Received TASK_DUE message from SW for task ID:', event.data.payload.taskId);
+                // 收到消息后，可以立即执行任务移动，或者只是标记一下，在下次刷新时处理
+                // 为了立即响应，我们直接调用处理函数
+                handleTaskDue(event.data.payload.taskId);
+            }
+            // 这里可以添加对其他SW消息的处理
+        });
+    }
     console.log("initializeApp: 应用初始化完成。");
 }
 
