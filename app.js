@@ -4237,5 +4237,3 @@ function showUpdatePrompt(worker) {
             console.log("User chose to update later.");
         }
     });
-}
-};
