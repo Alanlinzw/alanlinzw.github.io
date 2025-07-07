@@ -7,65 +7,63 @@
 // 这些代码在脚本加载时立即执行，不依赖DOM
 // ========================================================================
 
-
-// IndexedDB 键值对存储模块 (与之前修复版一致)
+// IndexedDB 键值对存储模块 (修正版，确保连接关闭)
 const db = (() => {
-    let dbInstance;
     const DB_NAME = 'EfficienTodoDB';
     const DB_VERSION = 3; 
     const STORE_NAME = 'data';
 
+    // 不再持有全局的 dbInstance promise
     function getDB() {
-        if (!dbInstance) {
-            dbInstance = new Promise((resolve, reject) => {
-                const openreq = indexedDB.open(DB_NAME, DB_VERSION);
-                openreq.onerror = (event) => {
-                    console.error("IndexedDB error:", event.target.error);
-                    reject(event.target.error);
-                };
-                openreq.onsuccess = (event) => {
-                    resolve(event.target.result);
-                };
-                openreq.onupgradeneeded = (event) => {
-                    const db = event.target.result;
-                    if (!db.objectStoreNames.contains(STORE_NAME)) {
-                        db.createObjectStore(STORE_NAME);
-                    }
-                };
-            });
-        }
-        return dbInstance;
+        return new Promise((resolve, reject) => {
+            const openreq = indexedDB.open(DB_NAME, DB_VERSION);
+            openreq.onerror = (event) => reject(event.target.error || 'IndexedDB open error');
+            openreq.onsuccess = (event) => resolve(event.target.result);
+            openreq.onupgradeneeded = (event) => {
+                const db = event.target.result;
+                if (!db.objectStoreNames.contains(STORE_NAME)) {
+                    db.createObjectStore(STORE_NAME);
+                }
+            };
+        });
     }
 
     function promisifyRequest(request) {
         return new Promise((resolve, reject) => {
             request.onsuccess = () => resolve(request.result);
-            request.onerror = (event) => reject(event.target.error);
+            request.onerror = (event) => reject(event.target.error || 'IndexedDB request error');
         });
     }
 
+    // withStore 保持不变
     async function withStore(type, callback) {
-        const dbHandle = await getDB();
-        const tx = dbHandle.transaction(STORE_NAME, type);
+        const db = await getDB(); // 每次操作都重新获取DB连接
+        const tx = db.transaction(STORE_NAME, type);
         const store = tx.objectStore(STORE_NAME);
+        
         let res;
         try {
-            res = await callback(store); 
+            res = await callback(store);
         } catch (error) {
-            try {
-              if (tx && tx.readyState !== 'done') {
-                tx.abort();
-              }
-            } catch (abortError) {
-              console.error("Error aborting transaction:", abortError);
-            }
             console.error("Error in withStore callback:", error);
+            try { tx.abort(); } catch (e) {}
+            db.close(); // 确保出错时也关闭连接
             throw error;
         }
-        return new Promise((resolveTransaction, rejectTransaction) => {
-            tx.oncomplete = () => resolveTransaction(res);
-            tx.onerror = (event) => rejectTransaction(event.target.error);
-            tx.onabort = (event) => rejectTransaction(event.target.error || new Error("Transaction aborted in withStore"));
+
+        return new Promise((resolve, reject) => {
+            tx.oncomplete = () => {
+                db.close(); // 【关键】事务完成后关闭连接
+                resolve(res);
+            };
+            tx.onerror = (event) => {
+                db.close(); // 【关键】事务错误时也关闭连接
+                reject(event.target.error);
+            };
+            tx.onabort = (event) => {
+                db.close(); // 【关键】事务中止时也关闭连接
+                reject(event.target.error || new Error("Transaction aborted"));
+            };
         });
     }
 
