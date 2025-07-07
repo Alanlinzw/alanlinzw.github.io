@@ -53,7 +53,7 @@ const db = {
 // ========================================================================
 // 1. Service Worker 生命周期事件
 // ========================================================================
-const CACHE_NAME = 'todo-list-cache-v7'; // 【MODIFIED】缓存版本号更新
+const CACHE_NAME = 'todo-list-cache-v8'; // 【MODIFIED】缓存版本号更新
 // 应用外壳通常是相对路径
 const APP_SHELL_URLS = [
   '/', 
@@ -89,6 +89,7 @@ const APP_SHELL_URLS = [
   '/images/icon-link.svg',
   '/images/icon-add-link.svg',
   '/images/icon-celebrate.svg',
+  '/images/icon-backup.svg',
 ];
 // 第三方库 CDN URL
 const VENDOR_URLS = [
@@ -142,6 +143,11 @@ self.addEventListener('activate', event => {
             console.log('[SW] Old caches deleted, claiming clients.');
             checkAndShowNotifications(); 
             return self.clients.claim(); 
+ .then(() => {
+            console.log('[SW] Activate: Claiming clients and running initial backup check.');
+            // 在激活时立即检查一次是否需要备份
+            handleAutoBackup();
+            return self.clients.claim();
         })
     );
 });
@@ -232,6 +238,29 @@ self.addEventListener('fetch', event => {
     );
   }
 });
+// ========================================================================
+// 2. 新增：Periodic Background Sync (如果浏览器支持)
+// ========================================================================
+self.addEventListener('periodicsync', (event) => {
+    if (event.tag === 'daily-todo-backup') {
+        console.log('[SW] Periodic Sync triggered for daily-todo-backup.');
+        event.waitUntil(handleAutoBackup());
+    }
+});
+
+// 在 app.js 中，需要有逻辑来注册这个 periodic sync
+// if ('serviceWorker' in navigator && 'PeriodicSyncManager' in window) {
+//     navigator.serviceWorker.ready.then(async (registration) => {
+//         try {
+//             await registration.periodicSync.register('daily-todo-backup', {
+//                 minInterval: 24 * 60 * 60 * 1000, // 24 hours
+//             });
+//             console.log('Periodic sync for daily backup registered.');
+//         } catch (e) {
+//             console.error('Periodic sync could not be registered!', e);
+//         }
+//     });
+// }
 
 
 // ========================================================================
@@ -273,7 +302,93 @@ self.addEventListener('message', event => {
         // 更复杂的实现会清除特定的 setTimeout。
         console.log('[SW] Received CANCEL_REMINDER for task ID:', event.data.payload.taskId, '. Notification (if pending via setTimeout) may still fire unless task data is updated/removed.');
     }
+     if (event.data && event.data.action === 'getBackupVersions') {
+        (async () => {
+            try {
+                const dbHandle = await openBackupDB();
+                const tx = dbHandle.transaction(VERSION_STORE_NAME, 'readonly');
+                const store = tx.objectStore(VERSION_STORE_NAME);
+                const keys = await promisifyRequest(store.getAllKeys());
+                dbHandle.close();
+                event.source.postMessage({ type: 'backupVersionsResponse', success: true, versions: keys.sort((a, b) => b - a) });
+            } catch (error) {
+                event.source.postMessage({ type: 'backupVersionsResponse', success: false, message: error.message });
+            }
+        })();
+    }
+
+    if (event.data && event.data.action === 'restoreFromBackup') {
+        (async () => {
+            try {
+                const dbHandle = await openBackupDB();
+                const tx = dbHandle.transaction(VERSION_STORE_NAME, 'readonly');
+                const store = tx.objectStore(VERSION_STORE_NAME);
+                const restoredData = await promisifyRequest(store.get(event.data.timestamp));
+                dbHandle.close();
+                
+                if (restoredData) {
+                    // **关键**: 在这里，我们不直接修改本地存储。
+                    // 我们把数据发回给 app.js，由它来完成最后的写入和UI刷新。
+                    event.source.postMessage({ type: 'restoreDataResponse', success: true, data: restoredData });
+                } else {
+                    throw new Error('找不到指定的备份版本。');
+                }
+            } catch (error) {
+                event.source.postMessage({ type: 'restoreDataResponse', success: false, message: error.message });
+            }
+        })();
+    }
 });
+
+const BACKUP_DB_NAME = 'EfficienTodo_Backups';
+const VERSION_STORE_NAME = 'versions';
+const MAX_BACKUPS = 14;
+
+async function handleAutoBackup() {
+    console.log('[BG-Backup] 开始执行每日自动备份...');
+    try {
+        const { tasks } = await chrome.storage.local.get('tasks');
+        if (!tasks || (!tasks.daily?.length && !tasks.monthly?.length)) {
+            console.log('[BG-Backup] 数据为空，跳过本次备份。');
+            return;
+        }
+
+        const db = await openBackupDB();
+        const transaction = db.transaction(VERSION_STORE_NAME, 'readwrite');
+        const store = transaction.objectStore(VERSION_STORE_NAME);
+
+        // 存储当前快照，使用时间戳作为key
+        const timestamp = Date.now();
+        store.put(tasks, timestamp);
+
+        // 清理旧的备份（保留策略）
+        const allKeysRequest = store.getAllKeys();
+        allKeysRequest.onsuccess = () => {
+            const keys = allKeysRequest.result;
+            if (keys.length > MAX_BACKUPS) {
+                keys.sort((a, b) => a - b); // 排序，最旧的在前
+                const keysToDelete = keys.slice(0, keys.length - MAX_BACKUPS);
+                keysToDelete.forEach(key => {
+                    store.delete(key);
+                    console.log(`[BG-Backup] 已删除旧的备份快照: ${new Date(key).toLocaleString()}`);
+                });
+            }
+        };
+
+        transaction.oncomplete = () => {
+            console.log(`[BG-Backup] 成功创建新的备份快照: ${new Date(timestamp).toLocaleString()}`);
+            db.close();
+        };
+        transaction.onerror = () => {
+            console.error('[BG-Backup] 备份事务执行失败。');
+            db.close();
+        };
+
+    } catch (error) {
+        console.error('[BG-Backup] 自动备份过程中发生错误:', error);
+    }
+}
+
 
 
 // ========================================================================
