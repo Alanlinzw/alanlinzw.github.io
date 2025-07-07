@@ -3830,68 +3830,101 @@ function hideVersionHistoryModal() {
     }
 }
 
-
-
 function renderVersionHistory() {
     if (!versionListDiv) return;
     versionListDiv.innerHTML = '<p>正在加载历史版本...</p>';
 
-    navigator.serviceWorker.controller.postMessage({ action: 'getBackupVersions' }, (response) => {
-        if (response && response.success) {
-            const versions = response.versions;
-            if (versions.length === 0) {
-                versionListDiv.innerHTML = '<p>暂无自动备份的历史快照。</p>';
-                return;
-            }
-            
-            versionListDiv.innerHTML = ''; // 清空加载提示
-            const ul = document.createElement('ul');
-            versions.forEach(timestamp => {
-                const li = document.createElement('li');
-                li.className = 'version-item'; // 自定义样式
-                
-                const dateSpan = document.createElement('span');
-                dateSpan.textContent = new Date(timestamp).toLocaleString('zh-CN', { 
-                    year: 'numeric', month: '2-digit', day: '2-digit', 
-                    hour: '2-digit', minute: '2-digit' 
-                });
+    // 1. 检查 Service Worker 是否可用
+    if (!('serviceWorker' in navigator)) {
+        versionListDiv.innerHTML = '<p style="color:var(--color-danger);">浏览器不支持此功能。</p>';
+        return;
+    }
 
-                const applyBtn = document.createElement('button');
-                applyBtn.textContent = '应用此版本';
-                applyBtn.className = 'header-action-btn-small';
-
-                applyBtn.onclick = () => {
-                    openCustomPrompt({
-                        title: '确认恢复',
-                        message: `您确定要将所有数据恢复到 ${dateSpan.textContent} 的状态吗？此操作将覆盖当前数据。`,
-                        confirmText: '确认恢复',
-                        onConfirm: () => {
-                            // 发送恢复请求到后台
-                            navigator.serviceWorker.controller.postMessage({ action: 'restoreFromBackup', timestamp: timestamp }, (restoreResponse) => {
-                                if (restoreResponse && restoreResponse.success) {
-                                    hideVersionHistoryModal();
-                                    loadTasks(renderAllLists); // 重新加载数据并刷新UI
-                                    setTimeout(() => {
-                                        openCustomPrompt({title: '成功', message: '数据已成功恢复！', inputType: 'none', confirmText: '好的', hideCancelButton: true});
-                                    }, 200);
-                                } else {
-                                    // 显示错误
-                                    openCustomPrompt({title: '失败', message: `恢复失败: ${restoreResponse.message}`, inputType: 'none', confirmText: '好的', hideCancelButton: true});
-                                }
-                            });
-                        }
-                    });
-                };
-
-                li.appendChild(dateSpan);
-                li.appendChild(applyBtn);
-                ul.appendChild(li);
-            });
-            versionListDiv.appendChild(ul);
-
-        } else {
-            versionListDiv.innerHTML = `<p style="color:var(--color-danger);">加载失败: ${response.message}</p>`;
+    // 2. 使用 .ready 来确保我们获取到的是一个已激活的 Service Worker
+    navigator.serviceWorker.ready.then(registration => {
+        
+        // 3. 检查 registration 和 active worker 是否存在
+        if (!registration || !registration.active) {
+            versionListDiv.innerHTML = '<p style="color:var(--color-danger);">后台服务未激活，请刷新页面重试。</p>';
+            return;
         }
+
+        // 4. 创建一个 MessageChannel 用于双向通信
+        // 这是从 SW 接收响应的最可靠方式
+        const messageChannel = new MessageChannel();
+        
+        // 5. 设置消息接收器
+        messageChannel.port1.onmessage = (event) => {
+            const response = event.data;
+            if (response && response.success) {
+                const versions = response.versions;
+                if (versions.length === 0) {
+                    versionListDiv.innerHTML = '<p>暂无自动备份的历史快照。</p>';
+                    return;
+                }
+                
+                versionListDiv.innerHTML = ''; // 清空加载提示
+                const ul = document.createElement('ul');
+                versions.forEach(timestamp => {
+                    const li = document.createElement('li');
+                    li.className = 'version-item';
+                    
+                    const dateSpan = document.createElement('span');
+                    dateSpan.textContent = new Date(timestamp).toLocaleString('zh-CN', { 
+                        year: 'numeric', month: '2-digit', day: '2-digit', 
+                        hour: '2-digit', minute: '2-digit' 
+                    });
+
+                    const applyBtn = document.createElement('button');
+                    applyBtn.textContent = '应用此版本';
+                    applyBtn.className = 'header-action-btn-small';
+
+                    applyBtn.onclick = () => {
+                        openCustomPrompt({
+                            title: '确认恢复',
+                            message: `您确定要将所有数据恢复到 ${dateSpan.textContent} 的状态吗？此操作将覆盖当前数据。`,
+                            confirmText: '确认恢复',
+                            onConfirm: () => {
+                                // 同样使用安全的方式发送恢复请求
+                                if (registration.active) {
+                                    const restoreChannel = new MessageChannel();
+                                    restoreChannel.port1.onmessage = (restoreEvent) => {
+                                        const restoreResponse = restoreEvent.data;
+                                        if (restoreResponse && restoreResponse.success) {
+                                            hideVersionHistoryModal();
+                                            // 【重要】后台只负责读取，前端负责写入和刷新
+                                            allTasks = restoreResponse.data;
+                                            saveTasks().then(renderAllLists);
+                                            setTimeout(() => {
+                                                openCustomPrompt({title: '成功', message: '数据已成功恢复！', inputType: 'none', confirmText: '好的', hideCancelButton: true});
+                                            }, 200);
+                                        } else {
+                                            openCustomPrompt({title: '失败', message: `恢复失败: ${restoreResponse.message}`, inputType: 'none', confirmText: '好的', hideCancelButton: true});
+                                        }
+                                    };
+                                    registration.active.postMessage({ action: 'restoreFromBackup', timestamp: timestamp }, [restoreChannel.port2]);
+                                }
+                            }
+                        });
+                    };
+
+                    li.appendChild(dateSpan);
+                    li.appendChild(applyBtn);
+                    ul.appendChild(li);
+                });
+                versionListDiv.appendChild(ul);
+
+            } else {
+                versionListDiv.innerHTML = `<p style="color:var(--color-danger);">加载失败: ${response ? response.message : '未知错误'}</p>`;
+            }
+        };
+
+        // 6. 发送消息，并将 port2 传递给 Service Worker
+        registration.active.postMessage({ action: 'getBackupVersions' }, [messageChannel.port2]);
+
+    }).catch(error => {
+        console.error("Service Worker not ready:", error);
+        versionListDiv.innerHTML = `<p style="color:var(--color-danger);">无法连接到后台服务: ${error.message}</p>`;
     });
 }
 
