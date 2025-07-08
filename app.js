@@ -3896,6 +3896,7 @@ function hideVersionHistoryModal() {
 }
 
 // 【核心修复】使用 navigator.serviceWorker.ready 和 MessageChannel
+
 function renderVersionHistory() {
     if (!versionListDiv) return;
     versionListDiv.innerHTML = '<p>正在加载历史版本...</p>';
@@ -3944,14 +3945,17 @@ function renderVersionHistory() {
                             message: `您确定要将所有数据恢复到 ${dateSpan.textContent} 的状态吗？此操作将覆盖当前数据。`,
                             confirmText: '确认恢复',
                             onConfirm: () => {
+                                // 【修复】使用 MessageChannel 与 SW 通信以恢复数据
                                 if (registration.active) {
                                     const restoreChannel = new MessageChannel();
                                     restoreChannel.port1.onmessage = (restoreEvent) => {
                                         const restoreResponse = restoreEvent.data;
                                         if (restoreResponse && restoreResponse.success) {
                                             hideVersionHistoryModal();
+                                            // 使用从SW返回的数据更新全局变量
                                             allTasks = restoreResponse.data;
                                             allTasks.lastUpdatedLocal = Date.now();
+                                            // 保存并刷新UI
                                             saveTasks().then(() => {
                                                 loadTasks(renderAllLists);
                                             });
@@ -3979,6 +3983,7 @@ function renderVersionHistory() {
             }
         };
 
+        // 【修复】发送消息到 SW，并传递 MessageChannel 的端口
         registration.active.postMessage({ action: 'getBackupVersions' }, [messageChannel.port2]);
 
     }).catch(error => {
@@ -3986,6 +3991,7 @@ function renderVersionHistory() {
         versionListDiv.innerHTML = `<p style="color:var(--color-danger);">无法连接到后台服务: ${error.message}</p>`;
     });
 }
+
 async function initializeApp() {
     console.log("initializeApp: 开始应用初始化。");
 statsModal = document.getElementById('stats-modal'); // 确保这行存在且正确
@@ -4242,11 +4248,4 @@ function showUpdatePrompt(worker) {
         }
     });
 }
-} // <--- 关键修正1：用 '}' 关闭 initializeApp 函数
-
-// ========================================================================
-// 9. 应用启动
-// ========================================================================
-
-// 关键修正2：在文档加载完成后，调用 initializeApp 函数来启动整个应用
-document.addEventListener('DOMContentLoaded', initializeApp);
+});
