@@ -3992,6 +3992,36 @@ function renderVersionHistory() {
     });
 }
 
+async function requestBackupCheck() {
+    console.log('[App] Performing daily backup check on startup.');
+    if (!('serviceWorker' in navigator)) {
+        return;
+    }
+
+    try {
+        const lastCheck = localStorage.getItem('lastBackupCheckTimestamp');
+        const now = Date.now();
+        // 检查周期设为 12 小时，更灵活
+        const TWELVE_HOURS = 12 * 60 * 60 * 1000; 
+
+        if (lastCheck && (now - parseInt(lastCheck, 10) < TWELVE_HOURS)) {
+            console.log('[App] Backup check already performed recently. Skipping.');
+            return;
+        }
+
+        const registration = await navigator.serviceWorker.ready;
+        if (registration && registration.active) {
+            console.log('[App] Sending "triggerAutoBackup" message to Service Worker.');
+            registration.active.postMessage({ action: 'triggerAutoBackup' });
+            localStorage.setItem('lastBackupCheckTimestamp', now.toString());
+        } else {
+            console.warn('[App] Could not send backup trigger: Service Worker not active.');
+        }
+    } catch (error) {
+        console.error('[App] Error during startup backup check:', error);
+    }
+}
+
 async function initializeApp() {
     console.log("initializeApp: 开始应用初始化。");
 statsModal = document.getElementById('stats-modal'); // 确保这行存在且正确
@@ -4223,5 +4253,6 @@ if ('serviceWorker' in navigator) {
         refreshing = true;
     });
 }
+    await requestBackupCheck();
 }
 document.addEventListener('DOMContentLoaded', initializeApp);
