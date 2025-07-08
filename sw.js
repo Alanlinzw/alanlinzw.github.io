@@ -1,8 +1,21 @@
 // sw.js
 
 // ========================================================================
-// 0. IndexedDB 帮助库
+// 0. IndexedDB 帮助库 (已修复版本号问题)
 // ========================================================================
+
+// --- START OF FIX ---
+// 定义与 app.js 同步的数据库版本号
+const MAIN_DB_NAME = 'EfficienTodoDB';
+const MAIN_DB_STORE = 'data';
+const MAIN_DB_VERSION = 3; // 关键：与 app.js 中的 DB_VERSION 保持一致
+
+const BACKUP_DB_NAME = 'EfficienTodo_Backups';
+const BACKUP_DB_STORE = 'versions';
+const BACKUP_DB_VERSION = 1; // 备份数据库版本号，通常保持为 1 即可
+// --- END OF FIX ---
+
+
 function promisifyRequest(request) {
     return new Promise((resolve, reject) => {
         request.onsuccess = () => resolve(request.result);
@@ -10,10 +23,16 @@ function promisifyRequest(request) {
     });
 }
 
-function createStore(dbName, storeName, retries = 3, delay = 100) {
+// --- START OF FIX ---
+// 修改函数签名，增加 version 参数
+function createStore(dbName, storeName, version, retries = 3, delay = 100) {
+// --- END OF FIX ---
     return new Promise((resolve, reject) => {
         const attemptOpen = (currentAttempt) => {
-            const request = indexedDB.open(dbName, 1);
+            // --- START OF FIX ---
+            // 使用传入的 version 参数，而不是硬编码的 1
+            const request = indexedDB.open(dbName, version);
+            // --- END OF FIX ---
 
             request.onerror = (event) => {
                 console.error(`[SW-DB] 打开数据库 '${dbName}' 失败 (尝试 ${currentAttempt}):`, event.target.error);
@@ -38,12 +57,10 @@ function createStore(dbName, storeName, retries = 3, delay = 100) {
                 }
             };
             
-            // 【关键】处理数据库被阻塞的情况
             request.onblocked = (event) => {
                 console.warn(`[SW-DB] 打开数据库 '${dbName}' 被阻塞 (尝试 ${currentAttempt}). 这通常意味着其他页面持有未关闭的连接。`);
                  if (currentAttempt < retries) {
                     console.log(`[SW-DB] 将在 ${delay * 2}ms 后重试 (因为被阻塞)...`);
-                    // 对于阻塞，等待时间可以更长一点
                     setTimeout(() => attemptOpen(currentAttempt + 1), delay * 2);
                 } else {
                     reject(`无法打开数据库: ${dbName}，因为连接持续被阻塞。`);
@@ -58,9 +75,12 @@ function createStore(dbName, storeName, retries = 3, delay = 100) {
 // 主数据存储
 const mainDb = {
     get: async (key) => {
-        const db = await createStore('EfficienTodoDB', 'data');
-        const tx = db.transaction('data', 'readonly');
-        const store = tx.objectStore('data');
+        // --- START OF FIX ---
+        // 传递正确的数据库名称、存储名称和版本号
+        const db = await createStore(MAIN_DB_NAME, MAIN_DB_STORE, MAIN_DB_VERSION);
+        // --- END OF FIX ---
+        const tx = db.transaction(MAIN_DB_STORE, 'readonly');
+        const store = tx.objectStore(MAIN_DB_STORE);
         const result = await promisifyRequest(store.get(key));
         db.close();
         return result;
@@ -70,31 +90,34 @@ const mainDb = {
 // 备份数据存储
 const backupDb = {
     get: async (key) => {
-        const db = await createStore('EfficienTodo_Backups', 'versions');
-        const tx = db.transaction('versions', 'readonly');
-        const store = tx.objectStore('versions');
+        // --- START OF FIX ---
+        // 传递正确的数据库名称、存储名称和版本号
+        const db = await createStore(BACKUP_DB_NAME, BACKUP_DB_STORE, BACKUP_DB_VERSION);
+        // --- END OF FIX ---
+        const tx = db.transaction(BACKUP_DB_STORE, 'readonly');
+        const store = tx.objectStore(BACKUP_DB_STORE);
         const result = await promisifyRequest(store.get(key));
         db.close();
         return result;
     },
     set: async (key, value) => {
-        const db = await createStore('EfficienTodo_Backups', 'versions');
-        const tx = db.transaction('versions', 'readwrite');
-        const store = tx.objectStore('versions');
+        const db = await createStore(BACKUP_DB_NAME, BACKUP_DB_STORE, BACKUP_DB_VERSION);
+        const tx = db.transaction(BACKUP_DB_STORE, 'readwrite');
+        const store = tx.objectStore(BACKUP_DB_STORE);
         await promisifyRequest(store.put(value, key));
         db.close();
     },
     delete: async (key) => {
-        const db = await createStore('EfficienTodo_Backups', 'versions');
-        const tx = db.transaction('versions', 'readwrite');
-        const store = tx.objectStore('versions');
+        const db = await createStore(BACKUP_DB_NAME, BACKUP_DB_STORE, BACKUP_DB_VERSION);
+        const tx = db.transaction(BACKUP_DB_STORE, 'readwrite');
+        const store = tx.objectStore(BACKUP_DB_STORE);
         await promisifyRequest(store.delete(key));
         db.close();
     },
     getAllKeys: async () => {
-        const db = await createStore('EfficienTodo_Backups', 'versions');
-        const tx = db.transaction('versions', 'readonly');
-        const store = tx.objectStore('versions');
+        const db = await createStore(BACKUP_DB_NAME, BACKUP_DB_STORE, BACKUP_DB_VERSION);
+        const tx = db.transaction(BACKUP_DB_STORE, 'readonly');
+        const store = tx.objectStore(BACKUP_DB_STORE);
         const keys = await promisifyRequest(store.getAllKeys());
         db.close();
         return keys;
@@ -104,7 +127,7 @@ const backupDb = {
 // ========================================================================
 // 1. Service Worker 生命周期事件
 // ========================================================================
-const CACHE_NAME = 'todo-list-cache-v10'; // 【MODIFIED】缓存版本号更新
+const CACHE_NAME = 'todo-list-cache-v11'; // 【MODIFIED】缓存版本号更新
 // 应用外壳通常是相对路径
 const APP_SHELL_URLS = [
   '/', 
