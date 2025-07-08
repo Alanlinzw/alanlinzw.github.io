@@ -277,6 +277,7 @@ self.addEventListener('fetch', event => {
       // event.respondWith(fetch(event.request)); // 如果没有特殊处理，这是默认行为
   }
 });
+
 // ========================================================================
 // 2. 新增：Periodic Background Sync (如果浏览器支持)
 // ========================================================================
@@ -313,6 +314,10 @@ self.addEventListener('message', event => {
     const port = event.ports[0];
 
     switch (messageType) {
+case 'triggerAutoBackup':
+            console.log('[SW] Received request to trigger auto backup from client.');
+            event.waitUntil(handleAutoBackup());
+            break;
         case 'getBackupVersions':
             (async () => {
                 try {
