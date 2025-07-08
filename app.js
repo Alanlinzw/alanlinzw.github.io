@@ -4191,38 +4191,39 @@ try {
 // 【新增】监听来自 Service Worker 的消息
 if ('serviceWorker' in navigator) {
     let newWorker;
-    
-    // 监听新版本安装
+
+    // 1. 监听新版本安装
     navigator.serviceWorker.ready.then(reg => {
         if (!reg) return;
         reg.addEventListener('updatefound', () => {
             newWorker = reg.installing;
             if (!newWorker) return;
             newWorker.addEventListener('statechange', () => {
-                // 当新 SW 安装完成但还在等待激活时，提示用户
                 if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                    // 新SW已安装，弹出更新提示
                     showUpdatePrompt(newWorker);
                 }
             });
         });
     }).catch(error => console.error("Error setting up 'updatefound' listener:", error));
 
-    // 检查页面加载时是否已经有等待中的新版本
+    // 2. 检查页面加载时是否已经有等待中的新版本
     navigator.serviceWorker.getRegistration().then(reg => {
         if (reg && reg.waiting) {
-            showUpdatePrompt(reg.waiting);
+            newWorker = reg.waiting;
+            showUpdatePrompt(newWorker);
         }
     }).catch(error => console.error("Error checking for waiting Service Worker:", error));
 
-    // 【核心修复】监听 Controller 变化，一旦新 SW 接管，立即刷新页面
-    let refreshing;
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
-        if (refreshing) return;
-        console.log("Controller has changed, reloading page to apply updates.");
-        window.location.reload();
-        refreshing = true;
-    });
+    // 【核心修复】移除激进的自动刷新逻辑
+    // let refreshing;
+    // navigator.serviceWorker.addEventListener('controllerchange', () => {
+    //     if (refreshing) return;
+    //     window.location.reload();
+    //     refreshing = true;
+    // });
 }
+
 // 【新增】一个统一的函数来显示更新提示框
 function showUpdatePrompt(worker) {
     openCustomPrompt({
@@ -4247,5 +4248,4 @@ function showUpdatePrompt(worker) {
         }
     });
 }
-
-document.addEventListener('DOMContentLoaded', initializeApp);
+}
