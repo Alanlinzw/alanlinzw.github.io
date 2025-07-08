@@ -1,4 +1,4 @@
-// sw.js (PWA 完整重构版) - 版本 4.0.2
+// sw.js
 
 // ========================================================================
 // 0. IndexedDB 帮助库
@@ -299,7 +299,9 @@ self.addEventListener('message', event => {
         case 'getBackupVersions':
             (async () => {
                 try {
+                    // 【修复】使用新的 backupDb 辅助库
                     const keys = await backupDb.getAllKeys();
+                    // 在这里排序，确保发送到前端的是有序的
                     if (port) port.postMessage({ success: true, versions: keys.sort((a, b) => b - a) });
                 } catch (error) {
                     if (port) port.postMessage({ success: false, message: error.message });
@@ -310,8 +312,10 @@ self.addEventListener('message', event => {
         case 'restoreFromBackup':
             (async () => {
                 try {
+                    // 【修复】使用新的 backupDb 辅助库
                     const restoredData = await backupDb.get(timestamp);
                     if (restoredData) {
+                        // 【修改】将恢复的数据发送回前端，由前端处理保存和UI更新
                         if (port) port.postMessage({ success: true, data: restoredData });
                     } else {
                         throw new Error('找不到指定的备份版本。');
@@ -343,6 +347,8 @@ self.addEventListener('message', event => {
     }
 });
 
+// sw.js
+
 const BACKUP_DB_NAME = 'EfficienTodo_Backups';
 const VERSION_STORE_NAME = 'versions';
 const MAX_BACKUPS = 14;
@@ -350,21 +356,25 @@ const MAX_BACKUPS = 14;
 async function handleAutoBackup() {
     console.log('[SW-Backup] 开始执行每日自动备份...');
     try {
+        // 【修复】使用正确的 key 'allTasks' 从主数据库获取数据
         const tasks = await mainDb.get('allTasks');
         if (!tasks || (!tasks.daily?.length && !tasks.monthly?.length)) {
             console.log('[SW-Backup] 主数据为空，跳过本次备份。');
             return;
         }
         const timestamp = Date.now();
+        // 使用新的 backupDb 辅助库进行设置
         await backupDb.set(timestamp, tasks);
         console.log(`[SW-Backup] 成功创建新的备份快照: ${new Date(timestamp).toLocaleString()}`);
         
+        // 【完成】实现清理旧备份的逻辑
         const allKeys = await backupDb.getAllKeys();
         if (allKeys.length > MAX_BACKUPS) {
-            allKeys.sort((a, b) => a - b);
+            allKeys.sort((a, b) => a - b); // 排序，最旧的在前
             const keysToDelete = allKeys.slice(0, allKeys.length - MAX_BACKUPS);
             for (const key of keysToDelete) {
                 await backupDb.delete(key);
+                console.log(`[SW-Backup] 已删除旧的备份快照: ${new Date(key).toLocaleString()}`);
             }
         }
     } catch (error) {
