@@ -213,87 +213,68 @@ self.addEventListener('activate', event => {
 self.addEventListener('fetch', event => {
   const requestUrl = new URL(event.request.url);
 
-  // 对于 chrome-extension:// 协议的请求，直接通过网络获取 (实际上是本地加载)
+  // 对于 chrome-extension:// 协议的请求，直接通过网络获取
   if (requestUrl.protocol === 'chrome-extension:') {
-    event.respondWith(fetch(event.request));
-    return;
+    return; // 让浏览器自己处理
   }
   
-  // 缓存策略:
-  // 1. 应用核心资源 (APP_SHELL_URLS) 和明确指定的第三方库 (VENDOR_URLS): Stale-While-Revalidate
-  // 2. Google API 调用 (googleapis.com, accounts.google.com GSI): Network first, then cache (如果成功)
-  //    因为这些API的响应可能经常变化或包含敏感信息，不适合长时间缓存。
-  //    但为了离线时应用能基本加载（即使同步失败），可以缓存加载器本身。
-  // 3. 其他所有请求: Network first
+  // 判断是否是应用核心资源 (HTML, JS)
+  const isAppShellPage = requestUrl.origin === self.location.origin && 
+                         (event.request.mode === 'navigate' || requestUrl.pathname.endsWith('.js'));
+  
+  // 判断是否是其他已知的静态资源 (CSS, images, etc.)
+  const isStaticAsset = APP_SHELL_URLS.some(
+      assetUrl => requestUrl.pathname.endsWith(assetUrl)
+  ) && !isAppShellPage;
 
-  const isAppOrVendorAsset = [...APP_SHELL_URLS, ...VENDOR_URLS].some(
-      assetUrl => requestUrl.pathname === assetUrl || requestUrl.href === assetUrl
-  );
-
-  // Stale-While-Revalidate for app assets and explicitly listed vendor assets
-  if (isAppOrVendorAsset || (requestUrl.origin === self.location.origin && !requestUrl.pathname.includes('/drive/v3/'))) { // 应用自身资源
+  // 策略 1: 【核心修复】对于应用核心 HTML 和 JS，使用 Network First
+  if (isAppShellPage) {
+    event.respondWith(
+      fetch(event.request)
+        .then(networkResponse => {
+          // 成功获取，放入缓存并返回
+          if (networkResponse && networkResponse.status === 200) {
+            const cacheAndRespond = async () => {
+              const cache = await caches.open(CACHE_NAME);
+              cache.put(event.request, networkResponse.clone());
+              return networkResponse;
+            };
+            // 异步执行缓存操作，不阻塞响应
+            event.waitUntil(cacheAndRespond());
+            return networkResponse;
+          }
+          // 如果网络请求失败或返回错误状态码，尝试从缓存中获取
+          return caches.match(event.request);
+        })
+        .catch(() => {
+          // 网络完全断开，从缓存中获取
+          console.log(`[SW] Network fetch failed for ${event.request.url}, falling back to cache.`);
+          return caches.match(event.request);
+        })
+    );
+  }
+  // 策略 2: 对于图片、CSS等其他静态资源，继续使用 Stale-While-Revalidate
+  else if (isStaticAsset) {
     event.respondWith(
       caches.open(CACHE_NAME).then(cache => {
         return cache.match(event.request).then(cachedResponse => {
           const fetchPromise = fetch(event.request).then(networkResponse => {
-            // 检查响应是否有效以及是否是我们要缓存的类型
-            // 对于 basic 类型（同源）或明确在 VENDOR_URLS 中的 CDN 资源
-            if (networkResponse && networkResponse.status === 200 && 
-                (networkResponse.type === 'basic' || VENDOR_URLS.includes(event.request.url))) {
+            if (networkResponse && networkResponse.status === 200) {
               cache.put(event.request, networkResponse.clone());
-            } else if (networkResponse && networkResponse.status !== 200) {
-              // console.warn('[SW] Network response not OK, not caching:', event.request.url, networkResponse.status);
             }
             return networkResponse;
-          }).catch(fetchError => {
-            // console.error('[SW] Fetch failed for (SWR):', event.request.url, fetchError);
-            // 如果网络请求失败且有缓存，则已返回缓存
-            throw fetchError; 
           });
-          return cachedResponse || fetchPromise; // 优先返回缓存，后台更新
-        }).catch(matchError => {
-          // console.warn('[SW] Cache match failed or network fetch failed for (SWR):', event.request.url, matchError);
-          // 对于导航请求，如果缓存和网络都失败，尝试返回 index.html
-          if (event.request.mode === 'navigate') {
-            console.log('[SW] Navigate request failed, trying offline page (index.html).');
-            return caches.match('/index.html'); // 确保 index.html 已被可靠缓存
-          }
-          // 对于其他类型的请求，让错误传播
+          // 优先返回缓存，后台更新
+          return cachedResponse || fetchPromise;
         });
       })
     );
-  } else if (requestUrl.hostname.includes('googleapis.com') || requestUrl.hostname.includes('accounts.google.com')) {
-    // Network first, then cache for Google API calls (but not Drive data uploads/downloads necessarily)
-    // This is mainly for the discovery docs or auth tokens that might be fetched.
-    // Drive file content itself is handled by app logic and not directly via SW fetch interception for caching.
-    event.respondWith(
-        fetch(event.request)
-            .then(networkResponse => {
-                if (networkResponse && networkResponse.status === 200 && event.request.method === 'GET') { // 只缓存GET请求
-                    // 谨慎缓存 Google API 响应，它们可能包含敏感数据或快速过期
-                    // 这里可以决定是否缓存特定的 Google API 路径
-                    // 例如，只缓存 discovery docs: if (requestUrl.pathname.includes('/discovery/v1/apis/'))
-                    // caches.open(CACHE_NAME).then(cache => {
-                    //    cache.put(event.request, networkResponse.clone());
-                    // });
-                }
-                return networkResponse;
-            })
-            .catch(error => {
-                // console.warn('[SW] Network request failed for Google API:', event.request.url, error);
-                // 尝试从缓存中获取 (如果之前有缓存过，例如 discovery docs)
-                // return caches.match(event.request);
-                // 或者直接让它失败，因为API调用失败通常意味着功能不可用
-            })
-    );
-  } else {
-    // For all other requests (e.g., external APIs not in VENDOR_URLS), go network first
-    event.respondWith(
-        fetch(event.request).catch(() => {
-            // console.warn('[SW] Network request failed for non-cached asset:', event.request.url);
-            // 可以返回一个通用的离线响应或让它失败
-        })
-    );
+  }
+  // 策略 3: 对于其他请求（如 Google API），直接走网络
+  else {
+      // 保持你原有的 Google API 或其他第三方 API 的处理逻辑
+      // 默认行为是直接 fetch
+      // event.respondWith(fetch(event.request)); // 如果没有特殊处理，这是默认行为
   }
 });
 // ========================================================================
