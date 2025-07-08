@@ -10,17 +10,48 @@ function promisifyRequest(request) {
     });
 }
 
-function createStore(dbName, storeName) {
+function createStore(dbName, storeName, retries = 3, delay = 100) {
     return new Promise((resolve, reject) => {
-        const request = indexedDB.open(dbName, 1);
-        request.onerror = (event) => reject('无法打开数据库: ' + dbName);
-        request.onsuccess = (event) => resolve(event.target.result);
-        request.onupgradeneeded = (event) => {
-            const db = event.target.result;
-            if (!db.objectStoreNames.contains(storeName)) {
-                db.createObjectStore(storeName);
-            }
+        const attemptOpen = (currentAttempt) => {
+            const request = indexedDB.open(dbName, 1);
+
+            request.onerror = (event) => {
+                console.error(`[SW-DB] 打开数据库 '${dbName}' 失败 (尝试 ${currentAttempt}):`, event.target.error);
+                if (currentAttempt < retries) {
+                    console.log(`[SW-DB] 将在 ${delay}ms 后重试...`);
+                    setTimeout(() => attemptOpen(currentAttempt + 1), delay);
+                } else {
+                    reject(`无法打开数据库: ${dbName}，已达到最大重试次数。`);
+                }
+            };
+
+            request.onsuccess = (event) => {
+                console.log(`[SW-DB] 成功打开数据库 '${dbName}' (尝试 ${currentAttempt})`);
+                resolve(event.target.result);
+            };
+
+            request.onupgradeneeded = (event) => {
+                console.log(`[SW-DB] onupgradeneeded for '${dbName}'`);
+                const db = event.target.result;
+                if (!db.objectStoreNames.contains(storeName)) {
+                    db.createObjectStore(storeName);
+                }
+            };
+            
+            // 【关键】处理数据库被阻塞的情况
+            request.onblocked = (event) => {
+                console.warn(`[SW-DB] 打开数据库 '${dbName}' 被阻塞 (尝试 ${currentAttempt}). 这通常意味着其他页面持有未关闭的连接。`);
+                 if (currentAttempt < retries) {
+                    console.log(`[SW-DB] 将在 ${delay * 2}ms 后重试 (因为被阻塞)...`);
+                    // 对于阻塞，等待时间可以更长一点
+                    setTimeout(() => attemptOpen(currentAttempt + 1), delay * 2);
+                } else {
+                    reject(`无法打开数据库: ${dbName}，因为连接持续被阻塞。`);
+                }
+            };
         };
+
+        attemptOpen(1);
     });
 }
 
@@ -122,29 +153,34 @@ const VENDOR_URLS = [
 
 self.addEventListener('install', event => {
   console.log('[SW] Install event');
-  self.skipWaiting(); // 强制新的 Service Worker 立即激活
+  self.skipWaiting(); 
   event.waitUntil(
-    caches.open(CACHE_NAME).then(cache => {
-      console.log('[SW] Cache opened. Caching app shell and vendor files...');
-      
-      const urlsToCache = [...APP_SHELL_URLS, ...VENDOR_URLS].filter(
-        url => !url.startsWith('chrome-extension://') && (url.startsWith('http') || url.startsWith('/'))
-      );
-      
-      console.log('[SW] URLs to cache:', urlsToCache);
-      if (urlsToCache.length > 0) {
-        return cache.addAll(urlsToCache) // addAll 是原子操作，要么全部成功，要么全部失败
-          .then(() => console.log('[SW] All specified HTTP/HTTPS files cached successfully.'))
-          .catch(err => {
-            console.error("[SW] Failed to cache one or more files during install:", err);
-            // 即使部分文件缓存失败，也可能希望 SW 安装成功，以便核心功能可用
-            // 但如果关键文件失败，这可能导致问题。addAll 的原子性有助于此。
-          });
-      } else {
-        console.log('[SW] No HTTP/HTTPS URLs to cache in install event.');
-        return Promise.resolve();
-      }
-    }).catch(err => console.error("[SW] Failed to open cache during install:", err))
+    (async () => {
+        try {
+            const cache = await caches.open(CACHE_NAME);
+            console.log('[SW] Cache opened. Caching app shell and vendor files...');
+            
+            const urlsToCache = [...APP_SHELL_URLS, ...VENDOR_URLS].filter(
+                url => !url.startsWith('chrome-extension://') && (url.startsWith('http') || url.startsWith('/'))
+            );
+
+            console.log('[SW] URLs to cache:', urlsToCache);
+
+            // 【核心修复】使用 for...of 循环和独立的 add 请求，而不是 addAll
+            for (const url of urlsToCache) {
+                try {
+                    await cache.add(url);
+                } catch (err) {
+                    // 如果某个特定文件缓存失败，只打印警告，不中断整个安装过程
+                    console.warn(`[SW] Failed to cache individual file: ${url}`, err);
+                }
+            }
+            
+            console.log('[SW] Caching process completed.');
+        } catch (err) {
+            console.error("[SW] Major error during install event:", err);
+        }
+    })()
   );
 });
 
