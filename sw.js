@@ -14,7 +14,8 @@ const BACKUP_DB_NAME = 'EfficienTodo_Backups';
 const BACKUP_DB_STORE = 'versions';
 const BACKUP_DB_VERSION = 1; // 备份数据库版本号，通常保持为 1 即可
 // --- END OF FIX ---
-
+const VERSION_STORE_NAME = 'versions';
+const MAX_BACKUPS = 14;
 
 function promisifyRequest(request) {
     return new Promise((resolve, reject) => {
@@ -127,7 +128,7 @@ const backupDb = {
 // ========================================================================
 // 1. Service Worker 生命周期事件
 // ========================================================================
-const CACHE_NAME = 'todo-list-cache-v11'; // 【MODIFIED】缓存版本号更新
+const CACHE_NAME = 'todo-list-cache-v12'; // 【MODIFIED】缓存版本号更新
 // 应用外壳通常是相对路径
 const APP_SHELL_URLS = [
   '/', 
@@ -250,54 +251,79 @@ self.addEventListener('fetch', event => {
       assetUrl => requestUrl.pathname.endsWith(assetUrl)
   ) && !isAppShellPage;
 
-  // 策略 1: 【核心修复】对于应用核心 HTML 和 JS，使用 Network First
+   // 策略 1: 【核心修复】对于应用核心 HTML 和 JS，使用 Network First
   if (isAppShellPage) {
     event.respondWith(
-      fetch(event.request)
-        .then(networkResponse => {
-          // 成功获取，放入缓存并返回
+      (async () => {
+        try {
+          const networkResponse = await fetch(event.request);
+          
+          // 检查网络响应是否有效
           if (networkResponse && networkResponse.status === 200) {
-            const cacheAndRespond = async () => {
-              const cache = await caches.open(CACHE_NAME);
-              cache.put(event.request, networkResponse.clone());
-              return networkResponse;
-            };
-            // 异步执行缓存操作，不阻塞响应
-            event.waitUntil(cacheAndRespond());
+            // --- START OF FIX ---
+            // 关键：在这里立即克隆响应。一个用于缓存，一个用于返回给浏览器。
+            const responseToCache = networkResponse.clone();
+            
+            // 异步地将克隆的响应放入缓存，不阻塞主流程
+            caches.open(CACHE_NAME).then(cache => {
+                cache.put(event.request, responseToCache);
+            });
+            
+            // 返回原始的响应给浏览器
             return networkResponse;
+            // --- END OF FIX ---
           }
+          
           // 如果网络请求失败或返回错误状态码，尝试从缓存中获取
-          return caches.match(event.request);
-        })
-        .catch(() => {
+          console.log(`[SW] Network request failed or returned status ${networkResponse.status}. Trying cache for ${event.request.url}`);
+          const cachedResponse = await caches.match(event.request);
+          if (cachedResponse) {
+            return cachedResponse;
+          }
+          // 如果缓存也没有，则返回网络错误响应（或者一个自定义的离线页面）
+          return networkResponse;
+
+        } catch (error) {
           // 网络完全断开，从缓存中获取
-          console.log(`[SW] Network fetch failed for ${event.request.url}, falling back to cache.`);
-          return caches.match(event.request);
-        })
-    );
-  }
-  // 策略 2: 对于图片、CSS等其他静态资源，继续使用 Stale-While-Revalidate
-  else if (isStaticAsset) {
-    event.respondWith(
-      caches.open(CACHE_NAME).then(cache => {
-        return cache.match(event.request).then(cachedResponse => {
-          const fetchPromise = fetch(event.request).then(networkResponse => {
-            if (networkResponse && networkResponse.status === 200) {
-              cache.put(event.request, networkResponse.clone());
-            }
-            return networkResponse;
+          console.log(`[SW] Network fetch failed for ${event.request.url}, falling back to cache.`, error);
+          const cachedResponse = await caches.match(event.request);
+          // 如果缓存中有，则返回缓存的响应
+          if (cachedResponse) {
+            return cachedResponse;
+          }
+          // 如果连缓存都没有，则无法提供服务（浏览器会显示默认的离线错误）
+          // 可以在这里返回一个自定义的离线页面 Response.error() 或 new Response(...)
+          return new Response("Network error and no cache available.", {
+            status: 408,
+            statusText: "Request Timeout",
+            headers: { 'Content-Type': 'text/plain' },
           });
-          // 优先返回缓存，后台更新
-          return cachedResponse || fetchPromise;
-        });
-      })
+        }
+      })()
     );
   }
-  // 策略 3: 对于其他请求（如 Google API），直接走网络
+  // 策略 2: 对于图片、CSS等其他静态资源，Stale-While-Revalidate
+  else if (isStaticAsset) {
+      // 这里的逻辑是正确的，不需要修改
+      event.respondWith(
+        caches.open(CACHE_NAME).then(cache => {
+          return cache.match(event.request).then(cachedResponse => {
+            const fetchPromise = fetch(event.request).then(networkResponse => {
+              if (networkResponse && networkResponse.status === 200) {
+                // 这里也是先克隆再操作，是正确的
+                cache.put(event.request, networkResponse.clone());
+              }
+              return networkResponse;
+            });
+            // 优先返回缓存，后台更新
+            return cachedResponse || fetchPromise;
+          });
+        })
+      );
+  }
+  // 策略 3: 对于其他请求，直接走网络
   else {
-      // 保持你原有的 Google API 或其他第三方 API 的处理逻辑
-      // 默认行为是直接 fetch
-      // event.respondWith(fetch(event.request)); // 如果没有特殊处理，这是默认行为
+      // 保持默认行为
   }
 });
 
@@ -394,9 +420,8 @@ case 'triggerAutoBackup':
 
 // sw.js
 
-const BACKUP_DB_NAME = 'EfficienTodo_Backups';
-const VERSION_STORE_NAME = 'versions';
-const MAX_BACKUPS = 14;
+
+
 
 async function handleAutoBackup() {
     console.log('[SW-Backup] 开始执行每日自动备份...');
