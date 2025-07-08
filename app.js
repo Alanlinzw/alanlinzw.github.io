@@ -4248,4 +4248,5 @@ function showUpdatePrompt(worker) {
         }
     });
 }
-});
+
+document.addEventListener('DOMContentLoaded', initializeApp);
