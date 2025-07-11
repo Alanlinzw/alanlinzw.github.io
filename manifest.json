@@ -11,7 +11,7 @@
   "orientation": "portrait-primary",
   "background_color": "#f5f7fa",
   "theme_color": "#3B82F6",
-  "version": "4.0.0",
+  "version": "4.1.0",
   "icons": [
     {
       "src": "images/icons/icon-192x192.png",
