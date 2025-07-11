@@ -561,6 +561,117 @@ async function handleTaskDue(dueTaskId) {
         renderAllLists();
     }
 }
+
+/**
+ * Generates a motivational quote based on completion percentage.
+ * @param {number} percentage - The completion percentage (0-100).
+ * @param {number} remainingTasks - The number of tasks left to do.
+ * @returns {string} A motivational string.
+ */
+function getMotivationalQuote(percentage, remainingTasks) {
+    if (percentage <= 0) {
+        return "✨ 新的一天，新的开始！从第一个任务做起吧！";
+    }
+    if (percentage < 30) {
+        return `👍 有了一个好的开始！继续努力，你会做得很好。`;
+    }
+    if (percentage < 50) {
+        return `🔥 你正走在正确的轨道上！完成一半就不远了。`;
+    }
+    if (percentage < 70) {
+        return `💪 继续加油！您已经完成了 ${Math.round(percentage)}% 的任务，还剩 ${remainingTasks} 个任务就完成了！`;
+    }
+    if (percentage < 100) {
+        return `🎉 非常棒！只剩下最后一点了，胜利在望！`;
+    }
+    return "🚀 太棒了！您已完成所有任务！"; // Fallback, should not be seen
+}
+
+
+/**
+ * Renders the progress tracker UI for a given list type.
+ * @param {('daily'|'monthly')} listType - The type of the list.
+ * @param {Array} tasks - The full array of tasks for the period to calculate progress.
+ */
+function renderProgressTracker(listType, tasks) {
+    const trackerEl = document.getElementById(`${listType}-progress-tracker`);
+    if (!trackerEl) return;
+
+    // Remove old event listener to prevent memory leaks
+    const newTrackerEl = trackerEl.cloneNode(true);
+    trackerEl.parentNode.replaceChild(newTrackerEl, trackerEl);
+    
+    const container = newTrackerEl.querySelector('.progress-container');
+    const barFill = newTrackerEl.querySelector('.progress-bar-fill');
+    const percentageText = newTrackerEl.querySelector('.progress-percentage');
+    const detailsPanel = newTrackerEl.querySelector('.progress-details');
+
+    if (!tasks || tasks.length === 0) {
+        newTrackerEl.style.display = 'none';
+        return;
+    }
+
+    const totalTasks = tasks.length;
+    const completedTasks = tasks.filter(t => t.completed).length;
+    const remainingTasks = totalTasks - completedTasks;
+    const percentage = totalTasks > 0 ? (completedTasks / totalTasks) * 100 : 0;
+
+    // Main logic: Show progress bar OR celebration message
+    if (percentage >= 100) {
+        newTrackerEl.style.display = 'none'; // Hide progress bar
+        const listElement = document.getElementById(`${listType}-task-list`);
+        const message = listType === 'daily' 
+            ? '太棒了，您完成了今日的所有任务！' 
+            : '太棒了，您完成了本月的所有任务！';
+        handleCompletionCelebration(listType, tasks, listElement, message);
+    } else {
+        newTrackerEl.style.display = 'block'; // Show progress bar
+        
+        // Ensure celebration message is hidden if tasks become incomplete again
+        const listElement = document.getElementById(`${listType}-task-list`);
+        handleCompletionCelebration(listType, [], listElement, ''); 
+
+        // Update bar width and color
+        barFill.style.width = `${percentage}%`;
+        barFill.classList.remove('low', 'medium', 'high');
+        if (percentage < 40) {
+            barFill.classList.add('low');
+        } else if (percentage < 80) {
+            barFill.classList.add('medium');
+        } else {
+            barFill.classList.add('high');
+        }
+
+        // Update percentage text
+        percentageText.textContent = `${Math.round(percentage)}%`;
+
+        // Update details panel content
+        detailsPanel.innerHTML = `
+            <div class="progress-details-stats">
+                <div class="stat-item">
+                    <span class="value">${Math.round(percentage)}%</span>
+                    <span class="label">完成率</span>
+                </div>
+                <div class="stat-item">
+                    <span class="value">${completedTasks}</span>
+                    <span class="label">已完成</span>
+                </div>
+                <div class="stat-item">
+                    <span class="value">${remainingTasks}</span>
+                    <span class="label">剩余</span>
+                </div>
+            </div>
+            <div class="motivation-quote">
+                ${getMotivationalQuote(percentage, remainingTasks)}
+            </div>
+        `;
+
+        // Add click listener to toggle details
+        container.addEventListener('click', () => {
+            newTrackerEl.classList.toggle('is-expanded');
+        });
+    }
+}
 function openModal(modalElement) { if (modalElement) modalElement.classList.remove('hidden'); }
 function closeModal(modalElement) { if (modalElement) modalElement.classList.add('hidden'); }
 function applyTheme(theme) { document.documentElement.setAttribute('data-theme', theme); currentTheme = theme; }
@@ -1027,6 +1138,7 @@ function renderDailyTasks(tasksToRender) {
         dailyTaskList,
         '太棒了，您完成了今日的所有任务！'
     );
+renderProgressTracker('daily', tasksToShow);
 }
 // --- END OF REPLACEMENT ---
 function renderMonthlyTasks(dataToRender, isHistoryView) {
@@ -1125,6 +1237,15 @@ function renderMonthlyTasks(dataToRender, isHistoryView) {
         // 如果是历史视图，确保移除可能存在的祝贺信息
         handleCompletionCelebration('monthly', [], monthlyTaskList, '');
     }
+if (!isHistoryView) {
+    // We pass the complete, unfiltered list of tasks for the current month
+    // to accurately calculate the overall progress.
+    renderProgressTracker('monthly', getMonthlyDataForDisplay());
+} else {
+    // For history views, ensure any tracker is hidden.
+    const tracker = document.getElementById('monthly-progress-tracker');
+    if (tracker) tracker.style.display = 'none';
+}
 }
 
 // 在 app.js 中，用这个版本替换掉你原来的 renderFutureTasks 函数
