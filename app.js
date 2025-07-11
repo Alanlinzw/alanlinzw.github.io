@@ -4298,46 +4298,48 @@ try {
     await loadTasks(); // 加载本地数据
     console.log("initializeApp: 任务已从 DB 加载。");
 
-    // 【新逻辑】检查首次同步状态
-    const firstSyncStatus = await db.get('isFirstSyncCompleted');
-    if (firstSyncStatus !== true && syncStatusSpan) {
-        syncStatusSpan.textContent = '请同步以合并数据';
-        setTimeout(() => {
-            if (syncStatusSpan.textContent === '请同步以合并数据') {
-                syncStatusSpan.textContent = '';
-            }
-        }, 8000);
-    }
-
-} catch (e) {
-        console.error("initializeApp: 初始任务加载时发生严重错误:", e);
-        openCustomPrompt({title:"加载数据失败", message:"无法加载您的数据，请尝试刷新页面或清除应用数据。", inputType:'none', confirmText:'好的', hideCancelButton:true});
-        return; // 阻止后续执行
-    }
     
-    // --- START OF REPLACEMENT ---
-    // 【修改】执行每日任务清理，并仅在有变动时保存
-    const dailyTasksChanged = cleanupDailyTasks();
-    if (dailyTasksChanged) {
-        console.log("initializeApp: 每日任务已清理，正在保存...");
-        await saveTasks(); // 注意: saveTasks 内部会触发自动同步
-    }
-    // --- END OF REPLACEMENT ---
+          // 执行每日任务清理，并仅在有变动时进行“静默保存”
+        const dailyTasksChanged = cleanupDailyTasks();
+        if (dailyTasksChanged) {
+            console.log("initializeApp: 每日任务已清理，正在进行静默保存...");
+            // 直接调用 db.set，绕过会触发自动同步的 saveTasks() 函数
+            await db.set('allTasks', allTasks);
+            console.log("initializeApp: 静默保存完成。");
+        }
 
-    checkAndMoveFutureTasks(); // 检查并移动到期的未来任务
-    console.log("initializeApp: 到期的未来任务已检查并移动。");
+        checkAndMoveFutureTasks(); // 检查并移动到期的未来任务 (这个函数内部会调用 saveTasks，但通常只在有任务到期时才调用，这是预期的行为)
+        console.log("initializeApp: 到期的未来任务已检查。");
+
+        // 检查首次同步状态，给用户提示
+        const firstSyncStatus = await db.get('isFirstSyncCompleted');
+        if (firstSyncStatus !== true && syncStatusSpan) {
+            syncStatusSpan.textContent = '请同步以关联云端';
+        }
+
+    } catch (e) {
+        console.error("initializeApp: 初始任务加载或清理时发生严重错误:", e);
+        openCustomPrompt({
+            title: "加载数据失败",
+            message: "无法加载您的数据，请尝试刷新页面或清除应用数据。",
+            inputType: 'none',
+            confirmText: '好的',
+            hideCancelButton: true
+        });
+        return;
+    }
 
     // 6. 初始渲染和设置
-    renderAllLists(); // 初始渲染所有列表
-    initSortable(); // 初始化拖拽排序
+    renderAllLists();
+    initSortable();
     console.log("initializeApp: 所有列表已渲染且拖拽功能已初始化。");
 
-    if (ledgerDateInput) { // 设置记账本默认日期为今天
+    if (ledgerDateInput) {
         ledgerDateInput.valueAsDate = new Date();
     }
 
     // 7. 设置初始视图
-    switchView('daily-section'); // 默认显示每日清单
+    switchView('daily-section');
     console.log("initializeApp: 初始视图已切换到每日清单。");
 
      if ('serviceWorker' in navigator && 'PeriodicSyncManager' in window) {
