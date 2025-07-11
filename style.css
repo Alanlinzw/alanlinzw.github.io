@@ -227,17 +227,6 @@ body { font-family: 'Inter', sans-serif; min-height: 100vh; width: 100%; margin:
 .task-edit-input { flex-grow: 1; border: 1px solid var(--primary-color); background-color: var(--card-bg); border-radius: var(--border-radius-sm); padding: 4px 8px; font-size: 15px; font-family: inherit; color: inherit; outline: none; }
 .note-display-text { font-size: 13px; color: var(--light-text-color); background-color: var(--control-bg); padding: var(--spacing-xs) var(--spacing-sm); border-radius: var(--border-radius-sm); margin-top: var(--spacing-xs); margin-left: var(--task-indent); line-height: 1.5; white-space: pre-wrap; word-break: break-word; border: 1px solid var(--control-border-color); }
 .progress-bar { position: absolute; left: 0; top: 0; height: 100%; background-color: var(--progress-bar-color); opacity: 0.4; transition: all 0.3s ease; z-index: 0; border-radius: var(--border-radius-md); }
-.progress-bar-container {
-    width: 100%; /* 【确保有这一行】 */
-    height: 12px;
-    background-color: var(--control-bg);
-    border-radius: 6px;
-    margin-bottom: var(--spacing-xl);
-    cursor: pointer;
-    overflow: hidden;
-    position: relative;
-    border: 1px solid var(--control-border-color);
-}
 .task-actions { display: flex; align-items: center; gap: var(--spacing-xs); flex-shrink: 0; margin-left: auto; padding-left: var(--spacing-sm); z-index: 1; }
 .action-btn { width: 30px; height: 30px; border: none; border-radius: var(--border-radius-round); background-color: transparent; color: var(--light-text-color); cursor: pointer; font-size: 16px; display: flex; align-items: center; justify-content: center; opacity: 0; transition: all 0.2s ease; }
 li:hover .action-btn { opacity: 0.7; }
@@ -1174,8 +1163,6 @@ body { padding-bottom: 80px; }
     display: grid;
     grid-template-columns: 1fr auto auto; /* 调整为三列布局 */
     align-items: center;
-    width: 100%; 
-    box-sizing: border-box;
 }
 #daily-section .input-area select {
     flex-grow: 0; /* 防止下拉框过度伸展 */
