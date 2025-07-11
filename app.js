@@ -338,8 +338,8 @@ const features = [  { title: "四大清单模块", description: "每日重复、
     { title: "数据洞察 (统计分析)", description: "全新的“统计分析”模块，通过图表清晰展示您的任务完成情况，帮助您更好地规划和决策。" },
     { title: "优先级任务管理", description: "“本月待办”支持设置高、中、低任务优先级，并可一键按优先级排序，助您聚焦核心任务。" } ];
 
-const versionUpdateNotes = {
-      "4.1.0": [
+const versionUpdateNotes = {     
+  "4.1.0": [
         "【全新功能】引入交互式任务进度条，提升您的成就感：",
         "    - 在“每日清单”和“本月待办”模块的标题下方新增了实时进度条。",
         "    - **可视化进度**：根据任务完成比例，以多彩渐变的形式直观展示您的进度。",
@@ -3024,7 +3024,6 @@ window.addEventListener('visibilitychange', () => {
 // 当窗口获得焦点时也触发（作为补充）
 window.addEventListener('focus', triggerSync);
 
-
 if (syncDriveBtn && syncStatusSpan) {
     syncDriveBtn.addEventListener('click', async () => {
         if (autoSyncTimer) {
@@ -3041,7 +3040,7 @@ if (syncDriveBtn && syncStatusSpan) {
 
         try {
             // ==========================================================
-            //  同步流程：准备阶段
+            //  同步流程：准备阶段 (这部分保持不变)
             // ==========================================================
             if (!driveSync.tokenClient) {
                 await loadGoogleApis();
@@ -3078,11 +3077,12 @@ if (syncDriveBtn && syncStatusSpan) {
             }
             
             // ==========================================================
-            //  核心决策逻辑
+            //  【全新】核心决策逻辑
             // ==========================================================
             const isFirstSyncCompleted = await db.get('isFirstSyncCompleted');
 
-            // 场景1：首次同步，且云端有数据 -> 弹出交互选择框
+            // 【第一层防御】首次同步，且云端有数据 -> 弹出交互选择框
+            // 我们通过检查云端是否有 'monthly' 任务来判断它是否真的有意义的数据
             if (isFirstSyncCompleted !== true && cloudData && Object.keys(cloudData).length > 0 && cloudData.monthly?.length > 0) {
                 
                 openCustomPrompt({
@@ -3109,17 +3109,19 @@ if (syncDriveBtn && syncStatusSpan) {
                                 
                                 if (choice === 'merge') {
                                     console.log("用户选择合并数据。");
-                                    // 使用 Set 去重，避免重复项
+                                    // 使用 Map 基于 ID 去重，后者会覆盖前者，实现合并和更新
                                     const mergeById = (arr1, arr2) => {
                                         const map = new Map();
-                                        [...(arr1 || []), ...(arr2 || [])].forEach(item => map.set(item.id, item));
+                                        [...(arr1 || []), ...(arr2 || [])].forEach(item => {
+                                            if(item && item.id) map.set(item.id, item);
+                                        });
                                         return Array.from(map.values());
                                     };
                                     finalData = {
-                                        daily: mergeById(cloudData.daily, localData.daily),
-                                        monthly: mergeById(cloudData.monthly, localData.monthly),
-                                        future: mergeById(cloudData.future, localData.future),
-                                        ledger: mergeById(cloudData.ledger, localData.ledger),
+                                        daily: mergeById(localData.daily, cloudData.daily),
+                                        monthly: mergeById(localData.monthly, cloudData.monthly),
+                                        future: mergeById(localData.future, cloudData.future),
+                                        ledger: [...(localData.ledger || []), ...(cloudData.ledger || [])], // 账本通常不去重，直接合并
                                         history: { ...localData.history, ...cloudData.history },
                                         ledgerHistory: { ...localData.ledgerHistory, ...cloudData.ledgerHistory },
                                         budgets: { ...localData.budgets, ...cloudData.budgets },
@@ -3145,8 +3147,7 @@ if (syncDriveBtn && syncStatusSpan) {
                                 
                                 syncStatusSpan.textContent = '操作成功！';
                                 renderAllLists();
-                                syncSucceeded = true; // 标记成功
-                                if (syncSucceeded) { /* 更新同步时间等后续操作 */ }
+                                syncSucceeded = true; 
                             };
                         });
                     },
@@ -3154,16 +3155,16 @@ if (syncDriveBtn && syncStatusSpan) {
                          throw new Error("用户取消了首次同步选择。");
                     }
                 });
-                // 注意：这里不设置 syncSucceeded，因为它将在 onRender 的回调中设置
+                // 注意：因为操作是异步的，所以我们在这里不立即返回或设置syncSucceeded
 
             } else {
-                // 场景2：常规同步，或首次同步但云端无数据
-                console.log("常规同步检测：执行基于时间戳的覆盖策略。");
+                // 【第二/三层防御】常规同步流程
+                console.log("常规同步检测：执行安全网和时间戳策略。");
 
-                const isLocalDataEmpty = (!localData.daily?.length && !localData.monthly?.length);
-                const isCloudDataEmpty = (!cloudData || (!cloudData.daily?.length && !cloudData.monthly?.length));
+                const isLocalDataEmpty = (!localData.daily?.length && !localData.monthly?.length && !localData.future?.length);
+                const isCloudDataEmpty = (!cloudData || (!cloudData.daily?.length && !cloudData.monthly?.length && !cloudData.future?.length));
                 
-                // 安全网逻辑
+                // 【安全网】
                 if (isLocalDataEmpty && !isCloudDataEmpty) {
                     console.warn("安全网：本地为空，云端有数据。将从云端恢复。");
                     allTasks = cloudData;
@@ -3173,6 +3174,7 @@ if (syncDriveBtn && syncStatusSpan) {
                     allTasks = localData;
                     await driveSync.upload(allTasks);
                     syncStatusSpan.textContent = '已将本地数据同步到云端。';
+                // 【时间戳比较】
                 } else if (cloudData && cloudData.lastUpdatedLocal > (localData.lastUpdatedLocal || 0)) {
                     console.log("常规同步：云端数据较新，覆盖本地。");
                     allTasks = cloudData;
@@ -3184,6 +3186,7 @@ if (syncDriveBtn && syncStatusSpan) {
                     syncStatusSpan.textContent = uploadResult.message;
                 }
                 
+                // 统一更新本地数据和时间戳
                 allTasks.lastUpdatedLocal = Date.now();
                 await db.set('allTasks', allTasks);
                 if (isFirstSyncCompleted !== true) {
@@ -3197,8 +3200,13 @@ if (syncDriveBtn && syncStatusSpan) {
             console.error("同步操作失败:", error);
             const errorMessage = error.message || '未知错误';
             syncStatusSpan.textContent = `同步错误: ${errorMessage.substring(0, 40)}...`;
-            // ... (错误提示的 openCustomPrompt 逻辑保持不变) ...
-
+             openCustomPrompt({
+                title: "同步失败",
+                message: `与云端同步时发生错误：\n${errorMessage}\n\n请检查您的网络连接和Google账户权限后重试。`,
+                inputType: 'none',
+                confirmText: '好的',
+                hideCancelButton: true
+            });
         } finally {
             syncDriveBtn.disabled = false;
             console.log("Sync: 同步流程结束，按钮已重新启用。");
@@ -3207,11 +3215,17 @@ if (syncDriveBtn && syncStatusSpan) {
                 updateSyncIndicator();
                 const timeString = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                 localStorage.setItem('lastSyncTime', timeString);
-                setTimeout(() => { if (!isDataDirty && syncStatusSpan) syncStatusSpan.textContent = ''; }, 7000);
+                setTimeout(() => { 
+                    if (!isDataDirty && syncStatusSpan.textContent.includes('同步')) {
+                        syncStatusSpan.textContent = '';
+                    }
+                 }, 7000);
             }
         }
     });
 }
+
+
 // 【新增】绑定备份与恢复的事件
     if (backupRestoreBtn) {
         backupRestoreBtn.addEventListener('click', () => {
