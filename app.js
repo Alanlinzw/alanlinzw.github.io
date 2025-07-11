@@ -4272,75 +4272,62 @@ if (!statsModal) {
     
     console.log("initializeApp: 所有 DOM 元素已获取。");
 
-    // 2. 绑定所有事件
-    bindEventListeners(); 
+     // 2. 绑定事件
+    bindEventListeners();
     console.log("initializeApp: 事件监听器已绑定。");
 
-    // 3. 加载非 DOM 相关的设置
+    // 3. 加载非数据设置
     loadTheme();
-    await loadNotificationSetting(); // loadNotificationSetting 内部会调用 updateNotificationButtonUI
+    await loadNotificationSetting();
     console.log("initializeApp: 主题和通知设置已加载。");
 
-    // 4. 加载 Google API (这会在内部初始化 driveSync.tokenClient)
+    // 4. 加载 Google API
     try {
-        console.log("initializeApp: 尝试加载 Google API...");
-        await loadGoogleApis(); // 等待 Google API 加载和 driveSync.tokenClient 初始化
-        console.log("initializeApp: Google API 已加载且 driveSync 客户端已初始化。");
+        await loadGoogleApis();
+        console.log("initializeApp: Google API 已加载。");
     } catch (error) {
-        console.error("initializeApp: 启动时加载 Google API 或初始化 driveSync 客户端失败:", error);
+        console.error("initializeApp: 启动时加载 Google API 失败:", error);
         if (syncStatusSpan) syncStatusSpan.textContent = 'Google 服务加载失败。';
     }
 
+    // 5. 【优化顺序】加载数据并立即检查同步状态
+    try {
+        await loadTasks();
+        console.log("initializeApp: 任务已从 DB 加载。");
 
-
-// 5. 加载数据并检查过期任务
-try {
-    await loadTasks(); // 加载本地数据
-    console.log("initializeApp: 任务已从 DB 加载。");
-
-    
-          // 执行每日任务清理，并仅在有变动时进行“静默保存”
-        const dailyTasksChanged = cleanupDailyTasks();
-        if (dailyTasksChanged) {
-            console.log("initializeApp: 每日任务已清理，正在进行静默保存...");
-            // 直接调用 db.set，绕过会触发自动同步的 saveTasks() 函数
-            await db.set('allTasks', allTasks);
-            console.log("initializeApp: 静默保存完成。");
-        }
-
-        checkAndMoveFutureTasks(); // 检查并移动到期的未来任务 (这个函数内部会调用 saveTasks，但通常只在有任务到期时才调用，这是预期的行为)
-        console.log("initializeApp: 到期的未来任务已检查。");
-
-        // 检查首次同步状态，给用户提示
+        // 【优化顺序】在对数据做任何修改前，先检查首次同步状态并提示用户
         const firstSyncStatus = await db.get('isFirstSyncCompleted');
         if (firstSyncStatus !== true && syncStatusSpan) {
             syncStatusSpan.textContent = '请同步以关联云端';
         }
 
+        // 6. 【优化顺序】现在才执行所有可能修改数据的启动时任务
+        const dailyTasksChanged = cleanupDailyTasks();
+        if (dailyTasksChanged) {
+            console.log("initializeApp: 每日任务已清理，正在进行静默保存...");
+            // 静默保存，不触发同步
+            await db.set('allTasks', allTasks); 
+        }
+
+        // checkAndMoveFutureTasks 会在内部调用 saveTasks()，但这是预期的，因为它只在有任务到期时触发
+        checkAndMoveFutureTasks(); 
+        console.log("initializeApp: 启动时任务检查完成。");
+
     } catch (e) {
-        console.error("initializeApp: 初始任务加载或清理时发生严重错误:", e);
-        openCustomPrompt({
-            title: "加载数据失败",
-            message: "无法加载您的数据，请尝试刷新页面或清除应用数据。",
-            inputType: 'none',
-            confirmText: '好的',
-            hideCancelButton: true
-        });
-        return;
+        console.error("initializeApp: 初始数据加载或处理时发生严重错误:", e);
+        openCustomPrompt({ title: "加载数据失败", message: `无法加载或处理您的数据：${e.message}`, inputType: 'none', confirmText: '好的', hideCancelButton: true });
+        return; // 关键：如果数据加载失败，终止初始化
     }
 
-    // 6. 初始渲染和设置
+    // 7. 渲染和最终设置
     renderAllLists();
     initSortable();
-    console.log("initializeApp: 所有列表已渲染且拖拽功能已初始化。");
+    console.log("initializeApp: UI 已渲染。");
 
     if (ledgerDateInput) {
         ledgerDateInput.valueAsDate = new Date();
     }
-
-    // 7. 设置初始视图
     switchView('daily-section');
-    console.log("initializeApp: 初始视图已切换到每日清单。");
 
      if ('serviceWorker' in navigator && 'PeriodicSyncManager' in window) {
         try {
