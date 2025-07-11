@@ -1216,6 +1216,7 @@ function renderMonthlyTasks(dataToRender, isHistoryView) {
     }
 
     if (!isHistoryView) {
+        // 在当前视图中，使用经过标签筛选的 filteredMonthlyTasks 来更新进度条
         updateSectionProgress('monthly', filteredMonthlyTasks);
     } else {
         // 在历史视图中，确保进度条和完成信息是隐藏的
