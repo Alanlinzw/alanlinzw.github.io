@@ -92,6 +92,15 @@
                 <img src="images/icon-daily.svg" alt="每日">
                 <h2>每日清单 <span id="daily-title-date" class="header-date"></span></h2>
             </div>
+<div id="daily-progress-tracker" class="progress-tracker">
+        <div class="progress-container">
+            <div class="progress-bar-fill"></div>
+            <span class="progress-percentage"></span>
+        </div>
+        <div class="progress-details">
+            <!-- Details will be populated by JavaScript -->
+        </div>
+    </div>
             <div class="input-area">
                 <input type="text" id="new-daily-task-input" placeholder="输入任务...">
                 <!-- 【新增】周期选择下拉框 -->
@@ -134,7 +143,15 @@
                 <a id="download-monthly-template-btn" class="header-action-btn-small" title="下载用于导入的 Excel 模板">下载模板</a>
                 <input type="file" id="import-monthly-file-input" class="hidden-file-input" accept=".xlsx, .xls">
             </div>
-  
+      <div id="monthly-progress-tracker" class="progress-tracker">
+        <div class="progress-container">
+            <div class="progress-bar-fill"></div>
+            <span class="progress-percentage"></span>
+        </div>
+        <div class="progress-details">
+            <!-- Details will be populated by JavaScript -->
+        </div>
+    </div>
             <div id="monthly-tags-container" class="tags-container"></div>
             <div class="input-area monthly-input-area">
                 <input type="text" id="new-monthly-task-input" placeholder="输入本月要完成的事项...">
