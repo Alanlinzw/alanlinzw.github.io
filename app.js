@@ -568,6 +568,115 @@ function toggleTheme() { const newTheme = currentTheme === 'light' ? 'dark' : 'l
 function loadTheme() { const savedTheme = localStorage.getItem('theme') || 'light'; applyTheme(savedTheme); }
 function generateUniqueId() { return `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`; }
 
+function getCompletionStats(tasks) {
+    if (!tasks || tasks.length === 0) {
+        return { total: 0, completed: 0, remaining: 0, percentage: 0 };
+    }
+    const total = tasks.length;
+    const completed = tasks.filter(t => t.completed).length;
+    const remaining = total - completed;
+    const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
+    return { total, completed, remaining, percentage };
+}
+
+function getMotivationalFeedback(stats) {
+    if (stats.percentage <= 0) return `💪 万事开头难，从第一个任务开始吧！`;
+    if (stats.percentage < 30) return `🚀 有了一个好的开始！已完成 ${stats.completed} 个任务，继续努力！`;
+    if (stats.percentage < 50) return `👍 进展顺利！任务列表已完成近一半，加油！`;
+    if (stats.percentage < 80) return `🎉 太棒了！您已经完成了 ${stats.percentage}% 的任务，只剩下 ${stats.remaining} 个任务了！`;
+    if (stats.percentage < 100) return `🏆 胜利在望！只差最后一点就全部完成了，坚持住！`;
+    return '';
+}
+
+function getProgressGradient(percentage) {
+    if (percentage <= 30) return 'linear-gradient(90deg, #F9A825, #FFD54F)';
+    if (percentage <= 70) return 'linear-gradient(90deg, #66BB6A, #AED581)';
+    return 'linear-gradient(90deg, #29B6F6, #4FC3F7)';
+}
+
+function showProgressInfoPanel(event, stats) {
+    const progressInfoPanel = document.getElementById('progress-info-panel');
+    if (!progressInfoPanel) return;
+
+    const statsDiv = progressInfoPanel.querySelector('#progress-info-stats');
+    const feedbackDiv = progressInfoPanel.querySelector('#progress-info-feedback');
+
+    if (statsDiv) {
+        statsDiv.innerHTML = `<span class="percentage">${stats.percentage}% 已完成</span><span class="counts">已完成: ${stats.completed} / ${stats.total}</span>`;
+    }
+    if (feedbackDiv) {
+        feedbackDiv.innerHTML = getMotivationalFeedback(stats);
+    }
+
+    const rect = event.currentTarget.getBoundingClientRect();
+    progressInfoPanel.style.top = `${rect.bottom + window.scrollY + 8}px`;
+    progressInfoPanel.style.left = `${rect.left + window.scrollX}px`;
+    
+    progressInfoPanel.classList.remove('hidden');
+
+    setTimeout(() => {
+        window.addEventListener('click', hideProgressInfoPanel, { once: true });
+    }, 0);
+}
+
+function hideProgressInfoPanel(event) {
+    const progressInfoPanel = document.getElementById('progress-info-panel');
+    if (!progressInfoPanel) return;
+
+    if (event && progressInfoPanel.contains(event.target)) {
+        window.addEventListener('click', hideProgressInfoPanel, { once: true });
+        return;
+    }
+    progressInfoPanel.classList.add('hidden');
+}
+
+function updateSectionProgress(prefix, tasks) {
+    let container = document.getElementById(`${prefix}-progress-container`);
+    const completionMessage = document.getElementById(`${prefix}-completion-message`);
+    
+    if (!container || !completionMessage) return;
+
+    const stats = getCompletionStats(tasks);
+
+    const newContainer = container.cloneNode(true);
+    container.parentNode.replaceChild(newContainer, container);
+    
+    container = newContainer;
+    const fill = container.querySelector(`.${prefix}-progress-fill`);
+
+    if (stats.total > 0 && stats.percentage < 100) {
+        completionMessage.style.display = 'none';
+        container.style.display = 'block';
+        
+        requestAnimationFrame(() => {
+            if(fill) {
+                fill.style.width = `${stats.percentage}%`;
+                fill.style.background = getProgressGradient(stats.percentage);
+            }
+        });
+        
+        container.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const currentTasks = (prefix === 'daily') 
+                ? (allTasks.daily || []).filter(task => {
+                      const dayMap = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
+                      const currentDayCycle = dayMap[new Date().getDay()];
+                      const cycle = task.cycle || 'daily';
+                      if (cycle === 'daily') return true;
+                      if (cycle === 'once') return task.creationDate === getTodayString();
+                      return cycle === currentDayCycle;
+                  })
+                : (getMonthlyDataForDisplay() || []).filter(task => currentMonthlyTagFilter === 'all' || (task.tags && task.tags.includes(currentMonthlyTagFilter)));
+            const currentStats = getCompletionStats(currentTasks);
+            showProgressInfoPanel(e, currentStats);
+        });
+
+    } else {
+        container.style.display = 'none';
+        completionMessage.style.display = (stats.total > 0 && stats.percentage === 100) ? 'block' : 'none';
+    }
+}
+
 function addTask(inputElement, taskArrayRefName, onCompleteCallback, options = {}) {
     const { type, tagsInputElement, dateElement } = options;
     const taskText = inputElement.value.trim();
@@ -1021,12 +1130,7 @@ function renderDailyTasks(tasksToRender) {
     });
     dailyTaskList.appendChild(fragment);
     
-    handleCompletionCelebration(
-        'daily',
-        tasksToShow,
-        dailyTaskList,
-        '太棒了，您完成了今日的所有任务！'
-    );
+ updateSectionProgress('daily', tasksToShow);
 }
 // --- END OF REPLACEMENT ---
 function renderMonthlyTasks(dataToRender, isHistoryView) {
@@ -1111,20 +1215,17 @@ function renderMonthlyTasks(dataToRender, isHistoryView) {
         document.body.dataset.sortModeExitListenerAttached = 'true';
     }
 
-    // --- 6. 【新增】处理祝贺信息 ---
-    // 注意：只在非历史视图下显示祝贺信息
     if (!isHistoryView) {
-        const currentMonthlyData = getMonthlyDataForDisplay(); // 获取当前月份的完整数据
-        handleCompletionCelebration(
-            'monthly',
-            currentMonthlyData, // 检查的是当前月份的完整任务列表
-            monthlyTaskList,
-            '太棒了，您完成了本月的所有任务！'
-        );
+        updateSectionProgress('monthly', filteredMonthlyTasks);
     } else {
-        // 如果是历史视图，确保移除可能存在的祝贺信息
-        handleCompletionCelebration('monthly', [], monthlyTaskList, '');
+        // 在历史视图中，确保进度条和完成信息是隐藏的
+        const monthlyProgressContainer = document.getElementById('monthly-progress-container');
+        const monthlyCompletionMessage = document.getElementById('monthly-completion-message');
+        if (monthlyProgressContainer) monthlyProgressContainer.style.display = 'none';
+        if (monthlyCompletionMessage) monthlyCompletionMessage.style.display = 'none';
     }
+
+
 }
 
 // 在 app.js 中，用这个版本替换掉你原来的 renderFutureTasks 函数
@@ -2279,43 +2380,7 @@ function formatReminderDateTime(timestamp) {
     }
 }
 function createDragHandle() { const handle = document.createElement('div'); handle.className = 'drag-handle'; handle.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M2 11h12v2H2zm0-5h12v2H2zm0-5h12v2H2z"/></svg>`; handle.title = '拖拽排序'; return handle; }
-function handleCompletionCelebration(listType, taskArray, listElement, message) {
-    if (!listElement) return;
 
-    const section = listElement.closest('.section');
-    if (!section) return;
-
-    // 先移除任何已存在的庆祝信息，以防重复
-    const existingCelebration = section.querySelector('.completion-celebration');
-    if (existingCelebration) {
-        existingCelebration.remove();
-    }
-
-    // 检查条件：列表不为空，且所有任务都已完成
-    if (taskArray && taskArray.length > 0 && taskArray.every(task => task.completed)) {
-        const celebrationDiv = document.createElement('div');
-        celebrationDiv.className = 'completion-celebration';
-        
-        const icon = document.createElement('img');
-        icon.src = 'images/icon-celebrate.svg';
-        icon.alt = '庆祝';
-        
-        const textSpan = document.createElement('span');
-        textSpan.textContent = message;
-        
-        celebrationDiv.appendChild(icon);
-        celebrationDiv.appendChild(textSpan);
-        
-        // 将祝贺信息插入到标题行下方
-        const header = section.querySelector('.section-header');
-        if (header && header.nextSibling) {
-            header.parentNode.insertBefore(celebrationDiv, header.nextSibling);
-        } else {
-            // 如果找不到下一个兄弟元素，就添加到 section 的开头（备用方案）
-            section.prepend(celebrationDiv);
-        }
-    }
-}
 function openHistoryModal(type) { 
     historyModalFor = type; 
     historyDisplayYear = new Date().getFullYear(); 
@@ -4126,7 +4191,15 @@ if (!statsModal) {
     versionHistoryModal = document.getElementById('version-history-modal');
     versionHistoryCloseBtn = document.getElementById('version-history-close-btn');
     versionListDiv = document.getElementById('version-list');
-    
+    const dailyCompletionMessage = document.getElementById('daily-completion-message');
+    const monthlyCompletionMessage = document.getElementById('monthly-completion-message');
+    const dailyProgressContainer = document.getElementById('daily-progress-container');
+    const dailyProgressFill = document.getElementById('daily-progress-fill');
+    const monthlyProgressContainer = document.getElementById('monthly-progress-container');
+    const monthlyProgressFill = document.getElementById('monthly-progress-fill');
+    const progressInfoPanel = document.getElementById('progress-info-panel');
+
+
     console.log("initializeApp: 所有 DOM 元素已获取。");
 
     // 2. 绑定所有事件
