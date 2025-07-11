@@ -92,6 +92,12 @@
                 <img src="images/icon-daily.svg" alt="每日">
                 <h2>每日清单 <span id="daily-title-date" class="header-date"></span></h2>
             </div>
+    <div class="progress-bar-container" id="daily-progress-container" style="display: none;">
+        <div class="progress-bar-fill" id="daily-progress-fill"></div>
+    </div>
+    <div id="daily-completion-message" class="completion-message">
+        🎉 太棒了，您已经完成今日所有任务！
+    </div>
             <div class="input-area">
                 <input type="text" id="new-daily-task-input" placeholder="输入任务...">
                 <!-- 【新增】周期选择下拉框 -->
@@ -134,7 +140,12 @@
                 <a id="download-monthly-template-btn" class="header-action-btn-small" title="下载用于导入的 Excel 模板">下载模板</a>
                 <input type="file" id="import-monthly-file-input" class="hidden-file-input" accept=".xlsx, .xls">
             </div>
-  
+      <div class="progress-bar-container" id="monthly-progress-container" style="display: none;">
+        <div class="progress-bar-fill" id="monthly-progress-fill"></div>
+    </div>
+    <div id="monthly-completion-message" class="completion-message">
+        🎉 太棒了，您已经完成本月所有任务！
+    </div>
             <div id="monthly-tags-container" class="tags-container"></div>
             <div class="input-area monthly-input-area">
                 <input type="text" id="new-monthly-task-input" placeholder="输入本月要完成的事项...">
@@ -317,6 +328,11 @@
         <a href="#future-section" class="tab-item" data-section="future-section"><img src="images/icon-future.svg" alt="未来计划"><span class="tab-label">未来计划</span></a>
         <a href="#ledger-section" class="tab-item" data-section="ledger-section"><img src="images/icon-ledger.svg" alt="记账本"><span class="tab-label">记账本</span></a>
     </nav>
+
+    <div id="progress-info-panel" class="progress-info-panel hidden">
+        <div id="progress-info-stats"></div>
+        <div id="progress-info-feedback"></div>
+    </div>
 
     <!-- 第三方库 -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
