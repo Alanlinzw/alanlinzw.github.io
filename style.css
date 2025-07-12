@@ -119,10 +119,17 @@ body { font-family: 'Inter', sans-serif; min-height: 100vh; width: 100%; margin:
    ========================================================================== */
 .main-header { display: flex; justify-content: space-between; align-items: center; padding-bottom: 0; margin-bottom: var(--spacing-lg); border-bottom: 1px solid var(--container-border-color); transition: border-color 0.3s; }
 .main-header h1 { font-size: 24px; font-weight: 700; margin: 0; flex-shrink: 0; }
-.search-container { position: relative; display: flex; align-items: center; width: 100%; margin-bottom: var(--spacing-xl); }
+.search-container {
+    position: relative;
+    display: flex; /* Use Flexbox for alignment */
+    align-items: center; /* Vertically center items */
+    gap: var(--spacing-sm); /* Add a gap between the input and the button */
+    width: 100%;
+    margin-bottom: var(--spacing-xl);
+}
 .search-icon { position: absolute; left: 14px; width: 18px; height: 18px; opacity: 0.5; pointer-events: none; transition: opacity 0.3s; }
 [data-theme="dark"] .search-icon { filter: var(--svg-icon-filter-dark); }
-#main-search-input { width: 100%; height: 44px; border: 1px solid var(--control-border-color); background-color: var(--control-bg); border-radius: var(--border-radius-pill); padding: 12px 20px 12px 45px; font-size: 15px; font-family: inherit; color: var(--text-color); outline: none; transition: all 0.2s ease; }
+#main-search-input { flex-grow: 1; width: 100%; height: 44px; border: 1px solid var(--control-border-color); background-color: var(--control-bg); border-radius: var(--border-radius-pill); padding: 12px 20px 12px 45px; font-size: 15px; font-family: inherit; color: var(--text-color); outline: none; transition: all 0.2s ease; }
 #main-search-input::placeholder { color: var(--light-text-color); opacity: 0.8; }
 #main-search-input:focus { border-color: var(--primary-color); background-color: var(--container-bg); box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary-color) 25%, transparent); }
 #main-search-input:focus + .search-icon { opacity: 0.8; }
@@ -1316,4 +1323,368 @@ body { padding-bottom: 80px; }
     border-top: 1px dashed var(--border-color);
     font-size: 14px;
     line-height: 1.6;
+}
+
+/* ==========================================================================
+   28. AI ASSISTANT STYLES (NEW)
+   ========================================================================== */
+
+.ai-assistant-trigger-container {
+    display: flex;
+    justify-content: center;
+    margin-bottom: var(--spacing-xl);
+}
+
+#ai-assistant-btn {
+    /* --- 1. 基础样式 (大部分保持不变) --- */
+    flex-shrink: 0;
+    white-space: nowrap;
+    height: 44px;
+    border: 1px solid var(--control-border-color);
+    color: var(--text-color);
+    background-color: var(--control-bg);
+    border-radius: var(--border-radius-pill);
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    
+    /* --- START OF REPLACEMENT/ADDITION --- */
+
+    /* --- 2. 使用 Flexbox 来对齐图标和文字 --- */
+    display: flex;
+    align-items: center;
+    gap: 8px; /* 图标和文字之间的间距 */
+
+    /* --- 3. 调整内边距，为左侧图标留出空间 --- */
+    padding: 10px 20px 10px 40px; /* 左侧内边距增大 */
+    
+    /* --- 4. 设置背景图标 --- */
+    background-image: url('images/icon-ai.svg'); /* 引用您的SVG文件 */
+    background-repeat: no-repeat;
+    background-position: 16px center; /* 将图标定位在左侧，垂直居中 */
+    background-size: 16px 16px; /* 控制图标的大小 */
+
+    /* --- END OF REPLACEMENT/ADDITION --- */
+}
+
+#ai-assistant-btn:hover {
+    border-color: var(--primary-color);
+    color: var(--primary-color);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color) 20%, transparent);
+    transform: translateY(-1px);
+}
+
+#ai-assistant-modal textarea {
+    width: 100%;
+    padding: 12px 14px;
+    font-size: 15px;
+    font-family: inherit;
+    color: var(--text-color);
+    background-color: var(--control-bg);
+    border: 1px solid var(--control-border-color);
+    border-radius: var(--border-radius-md);
+    outline: none;
+    box-sizing: border-box;
+    transition: all 0.2s ease;
+    min-height: 100px;
+    resize: vertical;
+}
+
+#ai-assistant-modal textarea:focus {
+    border-color: var(--primary-color);
+    background-color: var(--container-bg);
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary-color) 25%, transparent);
+}
+
+/* AI Loading Spinner */
+.spinner {
+    border: 3px solid var(--control-border-color);
+    border-top: 3px solid var(--primary-color);
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.hidden {
+    display: none !important;
+}
+
+/* AI Confirmation Preview Styles */
+#custom-prompt-modal .custom-prompt-input-area p {
+    margin: var(--spacing-xs) 0;
+    line-height: 1.6;
+    font-size: 15px;
+}
+#custom-prompt-modal .custom-prompt-input-area p strong {
+    color: var(--text-color);
+    display: inline-block;
+    width: 90px;
+}
+
+/* ==========================================================================
+   29. AI KEY DISPLAY STYLES (NEW)
+   ========================================================================== */
+
+#ai-key-display-area,
+#ai-key-input-area {
+    margin-bottom: var(--spacing-lg);
+}
+
+.masked-key-wrapper {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    background-color: var(--control-bg);
+    padding: 10px var(--spacing-md);
+    border-radius: var(--border-radius-md);
+    border: 1px solid var(--control-border-color);
+}
+
+#masked-api-key {
+    font-family: monospace;
+    font-size: 14px;
+    color: var(--text-color);
+    flex-grow: 1;
+    user-select: none; /* 防止用户意外选中星号 */
+    background: transparent;
+    border: none;
+    padding: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+#edit-api-key-btn {
+    flex-shrink: 0; /* 防止按钮被压缩 */
+    padding: 6px 12px; /* 按钮可以小一点 */
+    margin: 0;
+}
+
+/* ==========================================================================
+   30. MULTI-MODEL AI SETTINGS STYLES (COMPACT VERTICAL LAYOUT)
+   ========================================================================== */
+
+/* 1. 主容器样式 */
+.ai-settings-container {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-lg); /* 各个设置组之间的垂直间距 */
+}
+
+/* 2. 每个设置组的样式 */
+.ai-settings-group {
+    /* (不需要额外样式，间距由父容器的gap控制) */
+}
+
+/* 3. 设置组的标题样式 */
+.ai-settings-provider-title {
+    font-weight: 600;
+    font-size: 15px;
+    margin: 0 0 var(--spacing-sm) 0; /* 标题和下方控件的间距 */
+    color: var(--text-color);
+}
+
+/* 4. 遮罩层和输入区域的样式保持不变 */
+.masked-key-wrapper,
+.ai-key-input-area {
+    display: flex;
+    gap: var(--spacing-sm);
+    align-items: center;
+}
+
+.masked-key-wrapper,
+.ai-key-input-area .custom-prompt-input,
+#ai-model-selector {
+    width: 100%;
+    box-sizing: border-box; /* 确保 padding 不会影响宽度 */
+}
+
+.ai-key-input-area .custom-prompt-input {
+    flex-grow: 1; /* 让输入框填满空间 */
+}
+
+.ai-key-input-area .custom-prompt-btn {
+    flex-shrink: 0;
+}
+
+/* 5. 状态文本样式保持不变 */
+.api-status {
+    font-size: 13px;
+    margin-top: var(--spacing-xs);
+    min-height: 1.2em;
+    padding-left: 2px;
+}
+.api-status.loading { color: var(--light-text-color); }
+.api-status.success { color: var(--accent-teal); font-weight: 500; }
+.api-status.error { color: var(--danger-color); font-weight: 500; }
+
+/* ==========================================================================
+   31. AI SETTINGS MODAL HEIGHT ADJUSTMENT (COMPACT LAYOUT)
+   ========================================================================== */
+
+/* 1. 减小AI设置主容器的内边距 */
+#custom-prompt-modal .ai-settings-container {
+    padding-top: 0;
+    padding-bottom: 0;
+}
+
+/* 2. 减小每个设置组之间的垂直间距 */
+.ai-settings-container {
+    gap: var(--spacing-md); /* 使用中等间距，而不是之前的大间距(lg) */
+}
+
+/* 3. 减小每个组内标题和控件之间的间距 */
+.ai-settings-provider-title {
+    margin-bottom: var(--spacing-xs); /* 使用超小间距 */
+}
+
+/* 4. 减小状态文本与上方控件的间距 */
+.api-status {
+    margin-top: 2px;
+}
+
+/* ==========================================================================
+   32. AI REPORT GENERATOR STYLES (NEW)
+   ========================================================================== */
+.report-options-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+    gap: var(--spacing-sm);
+    margin-top: var(--spacing-lg);
+}
+
+.report-options-grid .header-action-btn-small {
+    width: 100%;
+    padding: 10px;
+    font-size: 14px;
+}
+
+#ai-report-output-view {
+    margin-top: var(--spacing-lg);
+}
+
+.report-content-area {
+    background-color: var(--control-bg);
+    border: 1px solid var(--control-border-color);
+    border-radius: var(--border-radius-md);
+    padding: var(--spacing-md) var(--spacing-lg);
+    min-height: 200px;
+    max-height: 50vh;
+    overflow-y: auto;
+    font-size: 15px;
+    line-height: 1.7;
+}
+
+.report-content-area h2,
+.report-content-area h3,
+.report-content-area h4 {
+    margin-top: 1.5em;
+    margin-bottom: 0.5em;
+    font-weight: 600;
+}
+.report-content-area h2:first-child,
+.report-content-area h3:first-child,
+.report-content-area h4:first-child {
+    margin-top: 0;
+}
+
+.report-content-area ul {
+    list-style: none;
+    padding-left: 0;
+    margin: 0;
+}
+
+.report-content-area li {
+    padding-left: 1.5em;
+    position: relative;
+    margin-bottom: 0.5em;
+}
+
+.report-content-area li::before {
+    content: '▪';
+    position: absolute;
+    left: 0;
+    color: var(--primary-color);
+}
+
+/* ==========================================================================
+   33. AI MODAL MODE SWITCHING STYLES (NEW)
+   ========================================================================== */
+
+.ai-mode-selector {
+    display: flex;
+    justify-content: center;
+    margin-bottom: var(--spacing-lg);
+    background-color: var(--control-bg);
+    border-radius: var(--border-radius-md);
+    padding: 4px;
+}
+
+.ai-mode-selector button {
+    flex: 1;
+    padding: 8px 16px;
+    border: none;
+    background-color: transparent;
+    color: var(--light-text-color);
+    font-size: 15px;
+    font-weight: 600;
+    border-radius: var(--border-radius-sm);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.ai-mode-selector button:hover {
+    color: var(--text-color);
+}
+
+.ai-mode-selector button.active {
+    background-color: var(--modal-bg); /* 或者 var(--container-bg) */
+    color: var(--primary-color);
+    box-shadow: var(--shadow-sm);
+}
+
+.ai-view {
+    /* 视图容器，不需要太多样式，主要用于JS控制显示/隐藏 */
+}
+
+/* 确保AI助手的加载动画ID正确 */
+.ai-loading-spinner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--light-text-color);
+}
+
+/* ==========================================================================
+   34. AI MODAL WIDTH CONSISTENCY FIX
+   ========================================================================== */
+
+/* 
+  为AI助手模态框的内容区设置一个最小宽度和默认宽度。
+  这样可以确保无论在哪个视图下，弹窗都保持一个统一、美观的宽度。
+*/
+#ai-assistant-modal .modal-content {
+    /* 
+     * 设置一个默认宽度，这会成为大部分情况下的实际宽度。
+     * 700px 是一个比较宽敞的值，可以根据您的喜好调整为 600px 或 650px。
+     */
+    width: 650px; 
+    
+    /* 
+     * 设置一个最小宽度，防止在内容极少时（如报告选项视图）过度收缩。
+     * 这个值通常比默认宽度小一些。
+     */
+    min-width: 500px; 
+    
+    /* 
+     * max-width 保持不变，确保在小屏幕上不会超出视口。
+     * 我们之前已经设置了 max-width: 700px; 这里无需改动。
+     */
 }
