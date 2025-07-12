@@ -22,8 +22,8 @@
 <body>
 
     <div class="container">
-        <div class="main-header">
-            <h1>高效待办清单</h1>
+<div class="main-header">
+    <h1>高效待办清单</h1>
             <div class="header-actions">
                 <!-- 始终显示的按钮 -->
         <button id="manual-refresh-btn" title="刷新数据" class="always-visible-action">
@@ -55,6 +55,10 @@
                         <img src="images/icon-features.svg" alt="Features">
                         <span>功能亮点</span>
                     </button>
+                    <button id="ai-settings-btn" title="AI 助手设置">
+                        <img src="images/icon-ai-settings.svg" alt="AI Settings"> <!-- 稍后会提供这个图标 -->
+                        <span>AI助手设置</span>
+                    </button>
                         <button id="backup-restore-btn" class="more-actions-menu-item" title="备份与恢复">
         <img src="images/icon-backup.svg" alt="Backup"> <!-- 确保你有这个图标 -->
         <span>备份与恢复</span>
@@ -81,11 +85,15 @@
         </div>
 
         
-        <div class="search-container">
+  <div class="search-container">
             <img src="images/icon-search.svg" alt="Search" class="search-icon">
             <input type="search" id="main-search-input" placeholder="搜索所有内容...">
+            
+            <!-- Move the button inside the search container -->
+            <button id="ai-assistant-btn" class="header-action-btn-small" title="AI智能助手">
+                AI 助手
+            </button>
         </div>
-        
         <!-- Sections will be shown/hidden by JS -->
         <div class="section" id="daily-section">
             <div class="section-header">
@@ -421,6 +429,59 @@
             <!-- 历史版本将由JS动态生成 -->
         </div>
         <p class="modal-footer">（选择一个版本以恢复）</p>
+    </div>
+</div>
+
+<div id="ai-assistant-modal" class="modal-overlay hidden">
+    <div class="modal-content has-sticky-footer" style="max-width: 700px; text-align: left;">
+        <button id="ai-assistant-close-btn" class="modal-close">×</button>
+        <h2 id="ai-modal-title" style="text-align: center;">AI 智能助手</h2>
+        
+        <!-- 1. 新增的模式切换器 (Tab) -->
+        <div class="ai-mode-selector">
+            <button id="ai-mode-add-btn" class="active" data-view="ai-add-view">智能添加</button>
+            <button id="ai-mode-report-btn" data-view="ai-report-view">生成报告</button>
+        </div>
+
+        <!-- 2. 智能添加视图 -->
+        <div id="ai-add-view" class="ai-view">
+            <p class="custom-prompt-message">请用自然语言描述您想做的事，例如：“提醒我明天下午3点开会” 或 “昨晚用微信花了50块吃饭”。</p>
+            <div class="custom-prompt-input-area">
+                <textarea id="ai-prompt-input" rows="5" placeholder="输入您的指令..."></textarea>
+            </div>
+            <div class="custom-prompt-actions">
+                <div id="ai-add-loading" class="ai-loading-spinner hidden">
+                    <div class="spinner"></div>
+                    <span>正在解析中...</span>
+                </div>
+                <button id="ai-process-btn" class="custom-prompt-btn custom-prompt-confirm">智能解析</button>
+            </div>
+        </div>
+
+        <!-- 3. 生成报告视图 -->
+        <div id="ai-report-view" class="ai-view hidden">
+            <p class="custom-prompt-message">请选择您想生成的报告类型：</p>
+            <div class="report-options-grid">
+                <button class="header-action-btn-small" data-report-type="daily_today">今日日报</button>
+                <button class="header-action-btn-small" data-report-type="weekly_this">本周周报</button>
+                <button class="header-action-btn-small" data-report-type="weekly_last">上周周报</button>
+                <button class="header-action-btn-small" data-report-type="monthly_this">本月月报</button>
+                <button class="header-action-btn-small" data-report-type="monthly_last">上月月报</button>
+                <button class="header-action-btn-small" data-report-type="yearly_this">年度报告</button>
+            </div>
+             <div id="ai-report-output" class="hidden">
+                <h3 id="ai-report-title"></h3>
+                <div id="ai-report-loading" class="ai-loading-spinner hidden">
+                     <div class="spinner"></div>
+                     <span>AI 正在奋笔疾书中...</span>
+                </div>
+                <div id="ai-report-content" class="report-content-area"></div>
+                <div class="custom-prompt-actions" style="margin-top: 1rem;">
+                    <button id="ai-report-copy-btn" class="custom-prompt-btn custom-prompt-confirm">复制报告</button>
+                    <button id="ai-report-back-btn" class="custom-prompt-btn custom-prompt-cancel">返回选择</button>
+                </div>
+            </div>
+        </div>
     </div>
 </div>
 </body>
