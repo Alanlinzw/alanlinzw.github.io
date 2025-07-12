@@ -58,6 +58,13 @@ Our extension requests the following permissions to function correctly:
     *   Access and manage its own configuration data in your Google Drive (e.g., read/write the specific `efficienTodoData.json` file). This isrequested using scopes `https://www.googleapis.com/auth/drive.file`. This permission is *only* used for storing and retrieving your extension's data file and does not grant access to other files in your Drive.
 *   **`notifications`**: Required to display desktop notifications for "Future Plan" task reminders.
 *   **`contextMenus`**: Used to provide a "Add to 高效待办清单" option in the right-click context menu when you select text on a webpage, allowing for quick task creation.
+*   **`downloads`**: This permission is used for data management features, allowing you to:
+    *   Export your task or ledger history as `.xlsx` (Excel) files.
+    *   Backup your entire application data as a `.json` file for manual transfer or safekeeping.
+*   **Host Permissions (`https://api.openai.com/` and `https://generativelanguage.googleapis.com/`)**: These permissions are **strictly required for the core AI Assistant feature**.
+    *   **Purpose**: To enable "Smart Add" and "Generate Report" functionalities, the extension needs to send requests from your browser directly to the AI service provider (OpenAI or Google Gemini) that you have selected and configured.
+    *   **User Control**: This feature is entirely optional and opt-in. It only functions if you **explicitly provide your own personal API Key** in the extension's settings.
+    *   **Data Privacy**: The extension acts only as a conduit. **We do not collect, store, or have access to your API Key or the content of your requests to these services.** The communication occurs directly between your browser and the respective AI provider's servers. Without these permissions, the AI Assistant feature will be disabled, but all other features of the extension will remain fully functional.
 
 ## 4. Third-Party Services
 
