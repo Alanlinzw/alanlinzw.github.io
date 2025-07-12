@@ -146,6 +146,8 @@ const APP_SHELL_URLS = [
   '/images/icon-notifications-blocked.svg', // 【NEW】新增通知状态图标
   '/images/icon-refresh.svg',
   '/images/icon-drive.svg',
+  '/images/icon-ai-settings.svg',
+  '/images/icon-ai.svg', 
   '/images/icon-stats.svg',
   '/images/icon-faq.svg',
   '/images/icon-features.svg',
