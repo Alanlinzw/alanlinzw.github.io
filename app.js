@@ -3628,7 +3628,7 @@ async function showAiSettingsModal() {
                     <button class="header-action-btn-small" data-provider="openai">修改</button>
                 </div>
                 <div id="openai-key-input-area" class="ai-key-input-area ${openaiKey ? 'hidden' : ''}">
-                    <input type="text" id="openai-api-key-input" class="custom-prompt-input" placeholder="sk-...">
+                    <input type="text" id="openai-api-key-input" class="custom-prompt-input" placeholder="请输入Openai api key...">
                     <button class="custom-prompt-btn custom-prompt-confirm" data-provider="openai">验证</button>
                 </div>
                 <p id="openai-status" class="api-status"></p>
@@ -3642,7 +3642,7 @@ async function showAiSettingsModal() {
                     <button class="header-action-btn-small" data-provider="gemini">修改</button>
                 </div>
                 <div id="gemini-key-input-area" class="ai-key-input-area ${geminiKey ? 'hidden' : ''}">
-                    <input type="text" id="gemini-api-key-input" class="custom-prompt-input" placeholder="AIzaSy...">
+                    <input type="text" id="gemini-api-key-input" class="custom-prompt-input" placeholder="请输入Gemini api key...">
                     <button class="custom-prompt-btn custom-prompt-confirm" data-provider="gemini">验证</button>
                 </div>
                 <p id="gemini-status" class="api-status"></p>
