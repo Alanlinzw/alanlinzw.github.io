@@ -511,6 +511,42 @@ function updateSyncIndicator() {
         syncDriveBtn.classList.remove('needs-sync');
     }
 }
+
+async function runAutomaticUpkeepTasks() {
+    // 使用一个全局标志来防止在单次会话中重复执行不必要的维护
+    if (window.automaticTasksHaveRun) {
+        return;
+    }
+
+    console.log("执行首次自动维护任务...");
+    let dataWasChanged = false;
+
+    // 1. 执行每日任务清理
+    if (cleanupDailyTasks()) {
+        console.log("每日任务已清理。");
+        dataWasChanged = true;
+    }
+
+    // 2. 执行未来任务移动 (确保 checkAndMoveFutureTasks 只移动数据，不保存)
+    if (checkAndMoveFutureTasks()) {
+        console.log("到期的未来任务已移动。");
+        dataWasChanged = true;
+    }
+
+    // 3. 如果有任何数据被自动修改，则统一进行一次保存
+    if (dataWasChanged) {
+        console.log("自动维护任务导致数据变更，正在保存...");
+        // 调用 saveTasks() 会更新时间戳并标记数据为 dirty，这是正确的行为
+        await saveTasks();
+        // 重新渲染UI以反映这些自动变化
+        renderAllLists();
+    }
+
+    // 4. 设置标志，表示本次启动后的自动维护已完成
+    window.automaticTasksHaveRun = true;
+    console.log("首次自动维护任务执行完毕。");
+}
+
 async function loadTasks(callback) {
     console.log("[PWA] Loading tasks from DB...");
     let data;
@@ -538,6 +574,8 @@ async function loadTasks(callback) {
     }
     if (callback) callback();
 }
+
+
 
 async function saveTasks() {
     allTasks.lastUpdatedLocal = Date.now();
