@@ -28,6 +28,8 @@ const db = (() => {
         });
     }
 
+
+
     function promisifyRequest(request) {
         return new Promise((resolve, reject) => {
             request.onsuccess = () => resolve(request.result);
@@ -73,7 +75,274 @@ const db = (() => {
     };
 })();
 
+function robustJsonParse(content) {
+    try {
+        return JSON.parse(content);
+    } catch (jsonError) {
+        console.warn("AI returned non-JSON content, attempting to extract from markdown.", content);
+        const jsonMatch = content.match(/```json\n([\s\S]*?)\n```/);
+        if (jsonMatch && jsonMatch[1]) {
+            try {
+                return JSON.parse(jsonMatch[1]);
+            } catch (nestedJsonError) {
+                throw new Error("AI 返回了被包裹但格式无效的JSON。");
+            }
+        }
+        throw new Error("AI未能返回有效的JSON内容。");
+    }
+}
+
+function maskApiKey(key) {
+    if (!key || key.length < 20) return '****';
+    const prefix = key.substring(0, 8);
+    const suffix = key.substring(key.length - 6);
+    return `${prefix}...${suffix}`;
+}
+
+const aiAssistant = {
+    REPORT_SYSTEM_PROMPT: `
+You are a professional assistant helping a user write concise and insightful work reports in Chinese. Based on the provided raw data, which includes both completed and uncompleted tasks, generate a report.
+
+The report should follow this structure:
+1.  **核心工作总结 (Core Work Summary)**:
+    - ONLY summarize tasks marked with "(status: completed)".
+    - List the key achievements. Use bullet points. Be concise and professional.
+2.  **遇到的问题与反思 (Challenges & Reflections)**:
+    - Analyze ALL tasks. If there are many tasks with "fix", "bug", "research" tags, you can mention challenges were overcome.
+    - If there are uncompleted tasks that have been pending for a while (based on context), you can gently mention them as potential roadblocks.
+    - If everything seems fine, just state "各项工作进展顺利 (All tasks progressed smoothly)".
+3.  **下阶段工作计划 (Next Steps)**:
+    - Focus on tasks marked with "(status: uncompleted)".
+    - List the most important upcoming tasks.
+4.  **财务简报 (Financial Briefing)**:
+    - If expense data is provided, briefly summarize it.
+
+Your tone should be professional, positive, and encouraging. Respond ONLY with the generated report content in Markdown format. Do not add any extra explanations.
+`,
+
+    SYSTEM_PROMPT: `
+You are an expert task parser for a to-do list application called "高效待办清单". Your job is to take a user's natural language input and convert it into a structured JSON object. You must ONLY return the JSON object, with no other text, explanations, or markdown formatting.
+The JSON object must have a "module" key and a "data" key. The "module" key must be one of "monthly", "future", "ledger", "daily", or "unknown".
+The "data" object structure depends on the module:
+1. If module is "monthly": {"text": (string), "tags": (array of strings), "priority": (number, 1-3)}
+2. If module is "future": {"text": (string), "reminder": (string, "YYYY-MM-DDTHH:mm")}
+3. If module is "ledger": {"date": (string, "YYYY-MM-DD"), "item": (string), "amount": (number), "payment": (string, optional)}
+4. If module is "daily": {"text": (string), "cycle": (string, 'daily'/'once'/'mon'...'sun')}
+Today is ${getTodayString()}. The current year is ${new Date().getFullYear()}.
+ALWAYS return only the raw JSON.
+`,
+
+    // --- 1. Key和模型选择的管理 ---
+    getKeys: () => ({
+        openai: localStorage.getItem('openai_api_key'),
+        gemini: localStorage.getItem('gemini_api_key')
+    }),
+    saveKey: (provider, key) => localStorage.setItem(`${provider}_api_key`, key),
+    
+    getSelectedModel: () => localStorage.getItem('selected_ai_model') || 'openai', // 默认OpenAI
+    setSelectedModel: (model) => localStorage.setItem('selected_ai_model', model),
+
+     // 统一的解析入口函数 (重构以接受 prompt)
+    generateAIResponse: async function(userInput, systemPrompt) {
+        const selectedModel = this.getSelectedModel();
+        if (selectedModel.startsWith('openai')) {
+            return this.parseWithOpenAI(userInput, systemPrompt);
+        } else if (selectedModel.startsWith('gemini')) {
+            return this.parseWithGemini(userInput, systemPrompt);
+        } else {
+            throw new Error('未选择有效的AI模型。');
+        }
+    },
+    
+    // 重构 OpenAI 解析函数
+    parseWithOpenAI: async function(userInput, systemPrompt) {
+        const apiKey = this.getKeys().openai;
+        if (!apiKey) throw new Error('OpenAI API Key 未设置。');
+        
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+            body: JSON.stringify({
+                model: 'o3-mini-2025-01-31',
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: userInput }
+                ],
+            })
+        });
+
+        if (!response.ok) throw new Error(`OpenAI Error: ${(await response.json()).error.message}`);
+        const result = await response.json();
+        return result.choices[0].message.content;
+    },
+
+    // 重构 Gemini 解析函数
+    parseWithGemini: async function(userInput, systemPrompt) {
+        const apiKey = this.getKeys().gemini;
+        if (!apiKey) throw new Error('Gemini API Key 未设置。');
+
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
+        const requestBody = {
+            "contents": [{ "parts": [{ "text": userInput }] }],
+            // Gemini 的 System Instruction 在这里设置
+            "systemInstruction": { "parts": [{ "text": systemPrompt }] },
+            "generationConfig": {
+                "temperature": systemPrompt === this.REPORT_SYSTEM_PROMPT ? 0.7 : 0.2
+            }
+        };
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(requestBody)
+        });
+
+        if (!response.ok) throw new Error(`Gemini Error: ${(await response.json()).error.message}`);
+        const result = await response.json();
+        return result.candidates[0].content.parts[0].text;
+    }
+};
+
+// 在 popup.js 中，用这个完整的版本替换现有的 getReportData 函数
+
+// 在 popup.js 中，用这个完整的、修复了语法错误的版本替换现有的 getReportData 函数
+
+/**
+ * 根据报告类型，准备要发送给AI的原始数据
+ * @param {string} reportType - e.g., 'daily_today', 'weekly_this', 'monthly_last'
+ * @returns {{title: string, data: string} | null}
+ */
+function getReportData(reportType) {
+    const now = new Date();
+    let startDate, endDate;
+    let title = "";
+    let isCurrentPeriod = false;
+
+    // 1. 根据 reportType 计算日期范围
+    switch (reportType) {
+        case 'daily_today': { // 使用花括号创建块级作用域
+            startDate = new Date(new Date().setHours(0, 0, 0, 0));
+            endDate = new Date(new Date().setHours(23, 59, 59, 999));
+            title = `${getTodayString()} 工作日报`;
+            isCurrentPeriod = true;
+            break;
+        }
+
+        case 'weekly_this': { // 使用花括号创建块级作用域
+            const currentDay = now.getDay();
+            const firstDayOfWeek = now.getDate() - currentDay + (currentDay === 0 ? -6 : 1);
+            startDate = new Date(new Date(now).setDate(firstDayOfWeek));
+            startDate.setHours(0, 0, 0, 0);
+            endDate = new Date(startDate);
+            endDate.setDate(startDate.getDate() + 6);
+            endDate.setHours(23, 59, 59, 999);
+            title = "本周工作周报";
+            isCurrentPeriod = true; // 本周也是当前时段
+            break;
+        }
+
+        case 'weekly_last': { // 使用花括号创建块级作用域
+            const currentDay = now.getDay();
+            const firstDayOfLastWeek = now.getDate() - currentDay + (currentDay === 0 ? -6 : 1) - 7;
+            startDate = new Date(new Date(now).setDate(firstDayOfLastWeek));
+            startDate.setHours(0, 0, 0, 0);
+            endDate = new Date(startDate);
+            endDate.setDate(startDate.getDate() + 6);
+            endDate.setHours(23, 59, 59, 999);
+            title = "上周工作周报";
+            break;
+        }
+
+        case 'monthly_this': { // 使用花括号创建块级作用域
+            startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+            endDate = new Date(new Date(now.getFullYear(), now.getMonth() + 1, 0).setHours(23, 59, 59, 999));
+            title = "本月工作月报";
+            isCurrentPeriod = true;
+            break;
+        }
             
+        case 'monthly_last': { // 使用花括号创建块级作用域
+            startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+            endDate = new Date(new Date(now.getFullYear(), now.getMonth(), 0).setHours(23, 59, 59, 999));
+            title = "上月工作月报";
+            break;
+        }
+
+        case 'yearly_this': { // 使用花括号创建块级作用域
+            startDate = new Date(now.getFullYear(), 0, 1);
+            endDate = new Date(new Date(now.getFullYear(), 11, 31).setHours(23, 59, 59, 999));
+            title = `${now.getFullYear()}年年度报告`;
+            isCurrentPeriod = true;
+            break;
+        }
+
+        default:
+            console.error("未知的报告类型:", reportType);
+            return null;
+    }
+
+    // 2. 收集所有相关数据（不筛选完成状态）
+    const allRelevantTasks = new Map();
+    const ledgerEntries = [];
+
+    const processTask = (task) => {
+        if (!task || !task.id) return; // 确保任务和ID有效
+        const relevantDateStr = task.completionDate || task.creationDate || (isCurrentPeriod ? getTodayString() : null);
+        if (relevantDateStr) {
+            const d = new Date(relevantDateStr);
+            if (d >= startDate && d <= endDate) {
+                if (!allRelevantTasks.has(task.id)) {
+                    allRelevantTasks.set(task.id, task);
+                }
+            }
+        }
+    };
+    
+    [
+        ...(allTasks.monthly || []),
+        ...(Object.values(allTasks.history || {})).flat(),
+        ...(allTasks.daily || [])
+    ].forEach(processTask);
+    
+    if (isCurrentPeriod) {
+        (allTasks.monthly || []).forEach(task => {
+            if (!task.completed && !allRelevantTasks.has(task.id)) {
+                allRelevantTasks.set(task.id, task);
+            }
+        });
+    }
+
+    [
+        ...(allTasks.ledger || []),
+        ...(Object.values(allTasks.ledgerHistory || {})).flat()
+    ].forEach(entry => {
+        if (entry.date) {
+            const d = new Date(entry.date);
+            if (d >= startDate && d <= endDate) {
+                ledgerEntries.push(entry);
+            }
+        }
+    });
+
+    const tasks = Array.from(allRelevantTasks.values());
+
+    // 3. 将数据格式化为纯文本，并明确标注状态
+    let formattedText = `## 任务清单:\n`;
+    if (tasks.length > 0) {
+        tasks.forEach(t => {
+            const status = t.completed ? 'completed' : 'uncompleted';
+            let taskLine = `- ${t.text} (status: ${status})`;
+            if (t.tags?.length > 0) {
+                taskLine += ` (tags: ${t.tags.join(', ')})`;
+            }
+            formattedText += `${taskLine}\n`;
+        });
+    } else {
+        formattedText += "- 本时段无相关任务。\n";
+    }
+
+}
+
 // Google Drive Sync Module
 const driveSync = {
     CLIENT_ID: '325408458040-bp083eplhebaj5eoe2m9go2rdiir9l6c.apps.googleusercontent.com',
@@ -289,6 +558,14 @@ let currentPromptConfig = {};
 let activeKeydownHandler = null; 
 let currentSearchTerm = '';
 let autoSyncTimer = null; // 用于存储延迟同步的定时器ID
+// AI相关UI元素
+let aiSettingsBtn, aiAssistantBtn, aiAssistantModal, aiAssistantCloseBtn, 
+    aiModeSelector, aiModeAddBtn, aiModeReportBtn, aiAddView, aiReportView, 
+    aiPromptInput, aiProcessBtn, aiAddLoading, 
+    reportOptionsGrid, aiReportOutput, aiReportTitle, 
+    aiReportLoading, aiReportContent, aiReportCopyBtn, aiReportBackBtn;
+// --- END OF REPLACEMENT ---
+
 const AUTO_SYNC_DELAY = 5000; // 延迟5秒 (5000毫秒)
 const faqs = [
     {
@@ -338,7 +615,21 @@ const features = [  { title: "四大清单模块", description: "每日重复、
     { title: "数据洞察 (统计分析)", description: "全新的“统计分析”模块，通过图表清晰展示您的任务完成情况，帮助您更好地规划和决策。" },
     { title: "优先级任务管理", description: "“本月待办”支持设置高、中、低任务优先级，并可一键按优先级排序，助您聚焦核心任务。" } ];
 
-const versionUpdateNotes = {     
+const versionUpdateNotes = {   
+    "4.2.0": [
+        "【重磅升级】AI 助手现已支持“智能添加”与“生成报告”两大核心功能！",
+        "    - **统一的AI入口**: 点击主界面新增的 ✨ AI 助手按钮，即可在统一的模态框中体验所有AI功能。",
+        "    - **多模型支持**: 您现在可以在“更多操作” > “AI助手设置”中，配置并选用 OpenAI 或 Google Gemini 模型，选择您最信赖的AI大脑。",
+        "    ",
+        "    **1. 智能添加 (新)**:",
+        "    - 只需用自然语言描述您的待办事项或开销，AI即可自动解析并填充到对应的清单中。",
+        "    - 例如，输入“提醒我明天下午3点开会”，AI会自动创建带有提醒时间的未来计划。",
+        "    - 例如，输入“昨晚用支付宝花了50块吃饭”，AI会自动为您记录一笔账单。",
+        "    ",
+        "    **2. 生成报告 (新)**:",
+        "    - AI可以根据您已完成和待办的任务，一键生成包含“核心工作总结”、“问题反思”和“下阶段计划”的专业报告。",
+        "    - 支持生成日报、周报、月报甚至年报，是您进行工作回顾和总结的得力帮手。"
+    ],  
   "4.1.0": [
         "【全新功能】引入交互式任务进度条，提升您的成就感：",
         "    - 在“每日清单”和“本月待办”模块的标题下方新增了实时进度条。",
@@ -1822,12 +2113,60 @@ function createTagButton(text, filterValue, currentFilter, container, onClick) {
 function createTaskTags(tags) { const container = document.createElement('div'); container.className = 'tags-on-task'; tags.forEach(tag => { const span = document.createElement('span'); span.className = 'task-tag-pill'; span.textContent = tag; container.appendChild(span); }); return container; }
 function renderFeaturesList() {
     if (!featuresListUl) return;
+
+    // 1. 清空现有列表
     featuresListUl.innerHTML = '';
+
+    // --- START OF REFACTOR ---
+
+    // 2. 提前处理版本号的获取和插入逻辑
+    const featuresModalContent = featuresListUl.closest('.features-modal-content');
+    const titleElement = featuresModalContent?.querySelector('h2');
+
+    // a. 先移除可能存在的旧版本信息元素，以防重复添加
+    const oldVersionInfo = featuresModalContent?.querySelector('.features-version-info');
+    if (oldVersionInfo) {
+        oldVersionInfo.remove();
+    }
+    
+    // b. 创建版本号元素
+    const versionLi = document.createElement('p'); // 使用 <p> 标签更语义化
+    versionLi.className = 'features-version-info'; // 保持类名以便应用样式
+    
+    // c. 异步获取 manifest.json 中的版本号
+    fetch('manifest.json')
+        .then(response => {
+            if (!response.ok) throw new Error('Network response was not ok');
+            return response.json();
+        })
+        .then(manifest => {
+            const manifestVersion = manifest.version || "未知";
+            versionLi.innerHTML = `<strong>当前版本:</strong> ${manifestVersion}`;
+        })
+        .catch(e => {
+            console.warn("无法从 manifest.json 获取版本号，将使用默认值。错误:", e);
+            versionLi.innerHTML = `<strong>当前版本:</strong> 4.2.0`; // 提供一个硬编码的备用版本号
+        })
+        .finally(() => {
+            // d. 无论成功与否，都将版本号元素插入到标题后面
+            if (titleElement && titleElement.nextSibling) {
+                titleElement.parentNode.insertBefore(versionLi, titleElement.nextSibling);
+            } else if (titleElement) {
+                titleElement.parentNode.appendChild(versionLi);
+            }
+        });
+
+    // --- END OF REFACTOR ---
+
+
+    // 3. 渲染主要的功能列表 (这部分逻辑保持不变)
     features.forEach(feature => {
         const li = document.createElement('li');
         li.innerHTML = `<strong>${feature.title}:</strong> ${feature.description}`;
         featuresListUl.appendChild(li);
     });
+    
+    // 4. 渲染更新历史 (这部分逻辑也保持不变)
     const sortedVersions = Object.keys(versionUpdateNotes).sort((a, b) => {
         const partsA = a.split('.').map(Number);
         const partsB = b.split('.').map(Number);
@@ -1838,6 +2177,7 @@ function renderFeaturesList() {
         }
         return 0;
     });
+    
     sortedVersions.forEach(versionKey => {
         const notes = versionUpdateNotes[versionKey];
         if (notes && notes.length > 0) {
@@ -1860,26 +2200,11 @@ function renderFeaturesList() {
             featuresListUl.appendChild(updatesSubList);
         }
     });
-    
-    let manifestVersion = "未知"; 
-    fetch('manifest.json')
-        .then(response => response.json())
-        .then(manifest => {
-            manifestVersion = manifest.version || "3.0.0"; 
-            const versionLi = document.createElement('li');
-            versionLi.classList.add('features-version-info');
-            versionLi.innerHTML = `<strong>当前版本:</strong> ${manifestVersion}`;
-            featuresListUl.appendChild(versionLi);
-        })
-        .catch(e => {
-            console.warn("无法从 manifest.json 获取版本号，将使用默认值。错误:", e);
-            manifestVersion = "3.0.0"; 
-             const versionLi = document.createElement('li');
-            versionLi.classList.add('features-version-info');
-            versionLi.innerHTML = `<strong>当前版本:</strong> ${manifestVersion}`;
-            featuresListUl.appendChild(versionLi);
-        });
+
+    // 5. 移除原来在列表末尾添加版本号的代码
+    // (这段逻辑已经被我们移动到函数开头了)
 }
+
 function hideFeaturesModal() { if (featuresModal) { featuresModal.classList.add('hidden'); } }
 function showFeaturesModal() { if(featuresModal) { renderFeaturesList(); featuresModal.classList.remove('hidden'); } }
 function showFaqModal() { 
@@ -3098,6 +3423,529 @@ function checkAndMoveFutureTasks() {
 return tasksWereMoved;
 }
 
+
+/**
+ * 根据报告类型，准备要发送给AI的原始数据
+ * @param {string} reportType - e.g., 'daily_today', 'weekly_this', 'monthly_last'
+ * @returns {{title: string, data: string} | null}
+ */
+function getReportData(reportType) {
+    const now = new Date();
+    let startDate, endDate;
+    let title = "";
+    let isCurrentPeriod = false;
+
+    // 1. 根据 reportType 计算日期范围
+    switch (reportType) {
+        case 'daily_today': { // 使用花括号创建块级作用域
+            startDate = new Date(new Date().setHours(0, 0, 0, 0));
+            endDate = new Date(new Date().setHours(23, 59, 59, 999));
+            title = `${getTodayString()} 工作日报`;
+            isCurrentPeriod = true;
+            break;
+        }
+
+        case 'weekly_this': { // 使用花括号创建块级作用域
+            const currentDay = now.getDay();
+            const firstDayOfWeek = now.getDate() - currentDay + (currentDay === 0 ? -6 : 1);
+            startDate = new Date(new Date(now).setDate(firstDayOfWeek));
+            startDate.setHours(0, 0, 0, 0);
+            endDate = new Date(startDate);
+            endDate.setDate(startDate.getDate() + 6);
+            endDate.setHours(23, 59, 59, 999);
+            title = "本周工作周报";
+            isCurrentPeriod = true; // 本周也是当前时段
+            break;
+        }
+
+        case 'weekly_last': { // 使用花括号创建块级作用域
+            const currentDay = now.getDay();
+            const firstDayOfLastWeek = now.getDate() - currentDay + (currentDay === 0 ? -6 : 1) - 7;
+            startDate = new Date(new Date(now).setDate(firstDayOfLastWeek));
+            startDate.setHours(0, 0, 0, 0);
+            endDate = new Date(startDate);
+            endDate.setDate(startDate.getDate() + 6);
+            endDate.setHours(23, 59, 59, 999);
+            title = "上周工作周报";
+            break;
+        }
+
+        case 'monthly_this': { // 使用花括号创建块级作用域
+            startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+            endDate = new Date(new Date(now.getFullYear(), now.getMonth() + 1, 0).setHours(23, 59, 59, 999));
+            title = "本月工作月报";
+            isCurrentPeriod = true;
+            break;
+        }
+            
+        case 'monthly_last': { // 使用花括号创建块级作用域
+            startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+            endDate = new Date(new Date(now.getFullYear(), now.getMonth(), 0).setHours(23, 59, 59, 999));
+            title = "上月工作月报";
+            break;
+        }
+
+        case 'yearly_this': { // 使用花括号创建块级作用域
+            startDate = new Date(now.getFullYear(), 0, 1);
+            endDate = new Date(new Date(now.getFullYear(), 11, 31).setHours(23, 59, 59, 999));
+            title = `${now.getFullYear()}年年度报告`;
+            isCurrentPeriod = true;
+            break;
+        }
+
+        default:
+            console.error("未知的报告类型:", reportType);
+            return null;
+    }
+
+    // 2. 收集所有相关数据（不筛选完成状态）
+    const allRelevantTasks = new Map();
+    const ledgerEntries = [];
+
+    const processTask = (task) => {
+        if (!task || !task.id) return; // 确保任务和ID有效
+        const relevantDateStr = task.completionDate || task.creationDate || (isCurrentPeriod ? getTodayString() : null);
+        if (relevantDateStr) {
+            const d = new Date(relevantDateStr);
+            if (d >= startDate && d <= endDate) {
+                if (!allRelevantTasks.has(task.id)) {
+                    allRelevantTasks.set(task.id, task);
+                }
+            }
+        }
+    };
+    
+    [
+        ...(allTasks.monthly || []),
+        ...(Object.values(allTasks.history || {})).flat(),
+        ...(allTasks.daily || [])
+    ].forEach(processTask);
+    
+    if (isCurrentPeriod) {
+        (allTasks.monthly || []).forEach(task => {
+            if (!task.completed && !allRelevantTasks.has(task.id)) {
+                allRelevantTasks.set(task.id, task);
+            }
+        });
+    }
+
+    [
+        ...(allTasks.ledger || []),
+        ...(Object.values(allTasks.ledgerHistory || {})).flat()
+    ].forEach(entry => {
+        if (entry.date) {
+            const d = new Date(entry.date);
+            if (d >= startDate && d <= endDate) {
+                ledgerEntries.push(entry);
+            }
+        }
+    });
+
+    const tasks = Array.from(allRelevantTasks.values());
+
+    // 3. 将数据格式化为纯文本，并明确标注状态
+    let formattedText = `## 任务清单:\n`;
+    if (tasks.length > 0) {
+        tasks.forEach(t => {
+            const status = t.completed ? 'completed' : 'uncompleted';
+            let taskLine = `- ${t.text} (status: ${status})`;
+            if (t.tags?.length > 0) {
+                taskLine += ` (tags: ${t.tags.join(', ')})`;
+            }
+            formattedText += `${taskLine}\n`;
+        });
+    } else {
+        formattedText += "- 本时段无相关任务。\n";
+    }
+
+    if (ledgerEntries.length > 0) {
+        const totalExpense = ledgerEntries.reduce((sum, e) => sum + (e.amount || 0), 0);
+        formattedText += `\n## 财务支出小结:\n`;
+        formattedText += `- 共 ${ledgerEntries.length} 笔支出，总计 ${allTasks.currencySymbol || '$'}${totalExpense.toFixed(2)}。\n`;
+    }
+
+    return { title, data: formattedText };
+}
+
+/**
+ * 主函数：处理报告生成流程
+ * @param {string} reportType 
+ */
+async function handleGenerateReport(reportType) {
+    // 切换视图
+    reportOptionsGrid.classList.add('hidden'); // 隐藏选项按钮
+    aiReportOutput.classList.remove('hidden');
+    aiReportLoading.classList.remove('hidden');
+    aiReportContent.innerHTML = '';
+
+    const reportPayload = getReportData(reportType);
+    if (!reportPayload) {
+        aiReportContent.textContent = "无法生成报告，无效的报告类型。";
+        aiReportLoading.classList.add('hidden');
+        return;
+    }
+    
+    aiReportTitle.textContent = reportPayload.title;
+
+    try {
+        const aiResponse = await aiAssistant.generateAIResponse(reportPayload.data, aiAssistant.REPORT_SYSTEM_PROMPT);
+        
+        // 使用一个简单的 Markdown -> HTML 转换器
+        const htmlContent = aiResponse
+            .replace(/^### (.*$)/gim, '<h4>$1</h4>')
+            .replace(/^## (.*$)/gim, '<h3>$1</h3>')
+            .replace(/^# (.*$)/gim, '<h2>$1</h2>')
+            .replace(/`([^`]+)`/g, '<code>$1</code>')
+            .replace(/\*\*(.*)\*\*/g, '<strong>$1</strong>')
+            .replace(/\*(.*)\*/g, '<em>$1</em>')
+            .replace(/^- (.*$)/gim, '<li>$1</li>')
+            .replace(/<\/li>(\s*<li)/gim, '</li>\n$1') // Add newlines between list items
+            .replace(/((<li>.*<\/li>\s*)+)/gim, '<ul>$1</ul>');
+
+
+        aiReportContent.innerHTML = htmlContent;
+
+    } catch (error) {
+        aiReportContent.innerHTML = `<p class="api-status error">生成报告失败: ${error.message}</p>`;
+    } finally {
+        aiReportLoading.classList.add('hidden');
+    }
+}
+
+
+
+async function showAiSettingsModal() {
+    const { openai: openaiKey, gemini: geminiKey } = aiAssistant.getKeys();
+    const selectedModel = aiAssistant.getSelectedModel();
+
+    const htmlContent = `
+        <div class="ai-settings-container">
+            <!-- OpenAI Group -->
+            <div class="ai-settings-group">
+                <p class="ai-settings-provider-title">OpenAI (模型: o3-mini)</p>
+                <div id="openai-key-display" class="masked-key-wrapper ${openaiKey ? '' : 'hidden'}">
+                    <span id="masked-openai-key">${maskApiKey(openaiKey)}</span>
+                    <button class="header-action-btn-small" data-provider="openai">修改</button>
+                </div>
+                <div id="openai-key-input-area" class="ai-key-input-area ${openaiKey ? 'hidden' : ''}">
+                    <input type="text" id="openai-api-key-input" class="custom-prompt-input" placeholder="sk-...">
+                    <button class="custom-prompt-btn custom-prompt-confirm" data-provider="openai">验证</button>
+                </div>
+                <p id="openai-status" class="api-status"></p>
+            </div>
+
+            <!-- Gemini Group -->
+            <div class="ai-settings-group">
+                <p class="ai-settings-provider-title">Google Gemini (模型: Gemini 2.5 Flash-Lite)</p>
+                <div id="gemini-key-display" class="masked-key-wrapper ${geminiKey ? '' : 'hidden'}">
+                    <span id="masked-gemini-key">${maskApiKey(geminiKey)}</span>
+                    <button class="header-action-btn-small" data-provider="gemini">修改</button>
+                </div>
+                <div id="gemini-key-input-area" class="ai-key-input-area ${geminiKey ? 'hidden' : ''}">
+                    <input type="text" id="gemini-api-key-input" class="custom-prompt-input" placeholder="AIzaSy...">
+                    <button class="custom-prompt-btn custom-prompt-confirm" data-provider="gemini">验证</button>
+                </div>
+                <p id="gemini-status" class="api-status"></p>
+            </div>
+
+            <!-- Model Selector Group -->
+            <div class="ai-settings-group">
+                <p class="ai-settings-provider-title">选择默认使用的AI模型</p>
+                <select id="ai-model-selector" class="header-select" style="width: 100%;">
+                    <option value="openai" ${selectedModel === 'openai' ? 'selected' : ''} ${!openaiKey ? 'disabled' : ''}>OpenAI (o3-mini)</option>
+                    <option value="gemini" ${selectedModel === 'gemini' ? 'selected' : ''} ${!geminiKey ? 'disabled' : ''}>Google Gemini (2.5 Flash-Lite)</option>
+                </select>
+            </div>
+        </div>
+    `;
+
+    openCustomPrompt({
+        title: 'AI 助手设置',
+        htmlContent: htmlContent,
+        hideConfirmButton: true,
+        cancelText: '完成',
+        
+        onRender: () => {
+            const modal = document.getElementById('custom-prompt-modal');
+            if (!modal) return;
+
+            // "修改" 按钮逻辑 (无需修改)
+            modal.querySelectorAll('.masked-key-wrapper button').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const provider = btn.dataset.provider;
+                    document.getElementById(`${provider}-key-display`).classList.add('hidden');
+                    document.getElementById(`${provider}-key-input-area`).classList.remove('hidden');
+                    const inputField = document.getElementById(`${provider}-api-key-input`);
+                    inputField.value = aiAssistant.getKeys()[provider] || '';
+                    inputField.focus();
+                });
+            });
+
+            // "验证" 按钮逻辑 (核心修改在这里)
+            modal.querySelectorAll('.ai-key-input-area button').forEach(btn => {
+                btn.addEventListener('click', async () => {
+                    const provider = btn.dataset.provider;
+                    const input = document.getElementById(`${provider}-api-key-input`);
+                    const statusEl = document.getElementById(`${provider}-status`);
+                    const key = input.value.trim();
+
+                    if (!key) {
+                        statusEl.textContent = "API Key 不能为空。";
+                        statusEl.className = 'api-status error';
+                        return;
+                    }
+
+                    statusEl.textContent = "正在验证...";
+                    statusEl.className = 'api-status loading';
+                    btn.disabled = true;
+
+                    try {
+                        let isValid = false;
+                        if (provider === 'openai') {
+                            const response = await fetch('https://api.openai.com/v1/models', { headers: { 'Authorization': `Bearer ${key}` } });
+                            if (!response.ok) {
+                                const errorData = await response.json();
+                                throw new Error(errorData.error.message || `HTTP ${response.status}`);
+                            }
+                            isValid = true;
+
+                        } else if (provider === 'gemini') {
+                            // --- START OF FIX: Use fetch to validate Gemini Key ---
+                            const validationUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${key}`;
+                            const response = await fetch(validationUrl);
+                            if (!response.ok) {
+                                const errorData = await response.json();
+                                throw new Error(errorData.error.message || `HTTP ${response.status}`);
+                            }
+                            // 检查返回的数据是否包含模型列表
+                            const data = await response.json();
+                            if (!data.models || data.models.length === 0) {
+                                throw new Error("API Key有效，但无可访问的模型。");
+                            }
+                            isValid = true;
+                            // --- END OF FIX ---
+                        }
+                        
+                        if (isValid) {
+                            aiAssistant.saveKey(provider, key);
+                            statusEl.textContent = "验证成功并已保存！";
+                            statusEl.className = 'api-status success';
+                            document.querySelector(`#ai-model-selector option[value=${provider}]`).disabled = false;
+                            document.getElementById(`${provider}-key-display`).classList.remove('hidden');
+                            document.getElementById(`masked-${provider}-key`).textContent = maskApiKey(key);
+                            document.getElementById(`${provider}-key-input-area`).classList.add('hidden');
+                        }
+
+                    } catch (err) {
+                        statusEl.textContent = `验证失败: ${err.message}`;
+                        statusEl.className = 'api-status error';
+                    } finally {
+                        btn.disabled = false;
+                    }
+                });
+            });
+
+            // 模型选择器逻辑 (无需修改)
+            const modelSelector = document.getElementById('ai-model-selector');
+            if(modelSelector) {
+                modelSelector.addEventListener('change', (e) => {
+                    aiAssistant.setSelectedModel(e.target.value);
+                });
+            }
+        }
+    });
+}
+async function handleAiProcess() {
+    const userInput = aiPromptInput.value.trim();
+    if (!userInput) return;
+
+    // 检查API Key的逻辑（保持不变）
+    const keys = aiAssistant.getKeys();
+    const selectedModel = aiAssistant.getSelectedModel();
+    if ((selectedModel === 'openai' && !keys.openai) || (selectedModel === 'gemini' && !keys.gemini)) {
+        closeModal(aiAssistantModal);
+        setTimeout(() => {
+            openCustomPrompt({
+                title: '需要 API Key',
+                message: `您选择的 ${selectedModel.toUpperCase()} 模型需要设置 API Key。请前往“AI助手设置”进行配置。`,
+                inputType: 'none',
+                confirmText: '好的，去设置',
+                hideCancelButton: true,
+                onConfirm: showAiSettingsModal
+            });
+        }, 200);
+        return;
+    }
+
+    // 显示加载状态
+    aiProcessBtn.disabled = true;
+    aiAddLoading.classList.remove('hidden'); 
+
+    try {
+        // 使用通用的 generateAIResponse 函数和默认的 SYSTEM_PROMPT
+        const parsedData = await aiAssistant.generateAIResponse(userInput, aiAssistant.SYSTEM_PROMPT);
+        if (parsedData) {
+           aiPromptInput.value = ''; // 清空输入
+            closeModal(aiAssistantModal); // **先关闭**AI助手模态框
+            showAIConfirmation(parsedData); // 再打开确认模态框
+        }
+        // 如果 parsedData 为 null（例如API调用内部处理了错误但没抛出），则流程会走到 finally
+
+    } catch (error) {
+        // --- 失败路径（核心修正） ---
+        console.error("AI processing failed in handler:", error);
+        
+        // **1. 关键步骤：在弹出错误提示前，先关闭当前的AI助手模态框**
+        closeModal(aiAssistantModal);
+
+        // 优化错误提示
+        let title = 'AI 助手出错';
+        let message = `处理您的请求时发生错误: ${error.message}`;
+        if (String(error.message).toLowerCase().includes('overloaded')) {
+            title = 'AI 服务器繁忙';
+            message = '当前AI模型正处于高负载状态，请稍后再试。这不是应用本身的错误，请您谅解。';
+        }
+
+        // **2. 使用 setTimeout 确保关闭动画完成后再弹出新提示，避免闪烁**
+        setTimeout(() => {
+            openCustomPrompt({
+                title: title,
+                message: message,
+                inputType: 'none',
+                confirmText: '好的',
+                hideCancelButton: true,
+            });
+        }, 200); // 延迟200毫秒
+
+    } finally {
+        // 恢复UI状态
+        aiProcessBtn.disabled = false;
+        aiAddLoading.classList.add('hidden');
+    }
+}
+
+function showAIConfirmation(parsedData) {
+    if (!parsedData || !parsedData.module || !parsedData.data) {
+        openCustomPrompt({ title: '解析失败', message: 'AI未能返回有效的数据结构。', inputType: 'none', confirmText: '好的', hideCancelButton: true });
+        return;
+    }
+
+    let previewHtml = `<h4>AI 已解析您的指令，请确认：</h4>`;
+    const { module, data } = parsedData;
+
+    switch (module) {
+        case 'monthly':
+            previewHtml += `
+                <p><strong>模块:</strong> 本月待办</p>
+                <p><strong>任务:</strong> ${data.text || 'N/A'}</p>
+                <p><strong>标签:</strong> ${data.tags?.join(', ') || '无'}</p>
+                <p><strong>优先级:</strong> ${data.priority === 3 ? '高' : data.priority === 1 ? '低' : '中'}</p>`;
+            break;
+        case 'future':
+            previewHtml += `
+                <p><strong>模块:</strong> 未来计划</p>
+                <p><strong>计划:</strong> ${data.text || 'N/A'}</p>
+                <p><strong>提醒时间:</strong> ${data.reminder ? new Date(data.reminder).toLocaleString() : '未设置'}</p>`;
+            break;
+        case 'ledger':
+            previewHtml += `
+                <p><strong>模块:</strong> 记账本</p>
+                <p><strong>日期:</strong> ${data.date || 'N/A'}</p>
+                <p><strong>项目:</strong> ${data.item || 'N/A'}</p>
+                <p><strong>金额:</strong> ${allTasks.currencySymbol || '$'}${data.amount || 0}</p>
+                <p><strong>支付方式:</strong> ${data.payment || '无'}</p>`;
+            break;
+        case 'daily':
+             previewHtml += `
+                <p><strong>模块:</strong> 每日清单</p>
+                <p><strong>任务:</strong> ${data.text || 'N/A'}</p>
+                <p><strong>周期:</strong> ${data.cycle || '每日'}</p>`;
+            break;
+        default:
+            previewHtml += `<p>AI 未能识别出具体操作，请尝试换一种说法。</p><p><strong>原因:</strong> ${data.reason || '未知'}</p>`;
+            openCustomPrompt({ title: '无法识别', htmlContent: previewHtml, confirmText: '好的', hideCancelButton: true });
+            return;
+    }
+
+    openCustomPrompt({
+        title: '确认添加',
+        htmlContent: previewHtml,
+        confirmText: '确认',
+        onConfirm: () => {
+            addAIParsedTask(parsedData);
+        }
+    });
+}
+
+function addAIParsedTask(parsedData) {
+    const { module, data } = parsedData;
+    let newTask = {};
+
+    switch (module) {
+        case 'monthly':
+            newTask = {
+                id: generateUniqueId(),
+                text: data.text,
+                completed: false,
+                links: [],
+                progress: 0,
+                progressText: '',
+                subtasks: [],
+                tags: data.tags || [],
+                completionDate: null,
+                priority: data.priority || 2
+            };
+            if (!allTasks.monthly) allTasks.monthly = [];
+            allTasks.monthly.unshift(newTask);
+            break;
+
+        case 'future':
+            newTask = {
+                id: generateUniqueId(),
+                text: data.text,
+                completed: false,
+                links: []
+            };
+            if (data.reminder) {
+                newTask.reminderTime = new Date(data.reminder).getTime();
+            }
+            if (!allTasks.future) allTasks.future = [];
+            allTasks.future.unshift(newTask);
+            break;
+
+        case 'ledger':
+            newTask = {
+                date: data.date,
+                item: data.item,
+                amount: data.amount,
+                payment: data.payment || '',
+                details: ''
+            };
+            if (!allTasks.ledger) allTasks.ledger = [];
+            allTasks.ledger.unshift(newTask);
+            break;
+        
+        case 'daily':
+            newTask = { 
+                id: generateUniqueId(), 
+                text: data.text, 
+                completed: false, 
+                note: '', 
+                links: [],
+                cycle: data.cycle || 'daily'
+            };
+            if (newTask.cycle === 'once') {
+                newTask.creationDate = getTodayString();
+            }
+            if (!allTasks.daily) allTasks.daily = [];
+            allTasks.daily.unshift(newTask);
+            break;
+    }
+
+    saveTasks();
+    renderAllLists();
+}
+
 let GAPI_INSTANCE = null;
 let GIS_OAUTH2_INSTANCE = null;
 
@@ -3510,6 +4358,99 @@ if (manualRefreshBtn) {
             }
         });
     }
+
+if (aiSettingsBtn) {
+    aiSettingsBtn.addEventListener('click', showAiSettingsModal);
+}
+if (aiAssistantBtn) {
+    aiAssistantBtn.addEventListener('click', () => openModal(aiAssistantModal));
+}
+
+
+if (aiPromptInput) {
+    aiPromptInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            handleAiProcess();
+        }
+    });
+}
+
+    // --- 调整 aiAssistantBtn 的监听器 ---
+    if (aiAssistantBtn) {
+        aiAssistantBtn.addEventListener('click', () => {
+            // 每次打开时，重置为“智能添加”模式
+            aiAddView.classList.remove('hidden');
+            aiReportView.classList.add('hidden');
+            aiModeAddBtn.classList.add('active');
+            aiModeReportBtn.classList.remove('active');
+            
+            // 重置报告视图到初始状态
+            reportOptionsGrid.classList.remove('hidden');
+            aiReportOutput.classList.add('hidden');
+
+            openModal(aiAssistantModal);
+        });
+    }
+
+    // --- 新增模式切换的监听器 ---
+    if (aiModeSelector) {
+        aiModeSelector.addEventListener('click', (e) => {
+            if (e.target.tagName !== 'BUTTON') return;
+            
+            // 移除所有按钮的 active 状态
+            aiModeSelector.querySelectorAll('button').forEach(btn => btn.classList.remove('active'));
+            // 为被点击的按钮添加 active 状态
+            e.target.classList.add('active');
+            
+            const viewId = e.target.dataset.view;
+            // 隐藏所有视图
+            document.querySelectorAll('.ai-view').forEach(view => view.classList.add('hidden'));
+            // 显示目标视图
+            if (document.getElementById(viewId)) {
+                document.getElementById(viewId).classList.remove('hidden');
+            }
+        });
+    }
+
+    // --- 报告选项的监听器 (逻辑不变，但确保元素引用正确) ---
+    if (reportOptionsGrid) {
+        reportOptionsGrid.addEventListener('click', (e) => {
+            if (e.target.tagName === 'BUTTON') {
+                const reportType = e.target.dataset.reportType;
+                handleGenerateReport(reportType);
+            }
+        });
+    }
+    
+    // --- 报告返回按钮的监听器 ---
+    if (aiReportBackBtn) {
+        aiReportBackBtn.addEventListener('click', () => {
+            reportOptionsGrid.classList.remove('hidden');
+            aiReportOutput.classList.add('hidden');
+        });
+    }
+
+ if (aiProcessBtn) {
+    aiProcessBtn.addEventListener('click', handleAiProcess);
+}
+
+   if (aiReportCopyBtn) {
+        aiReportCopyBtn.addEventListener('click', () => {
+            const reportText = aiReportContent.innerText; // 获取纯文本内容
+            navigator.clipboard.writeText(reportText).then(() => {
+                aiReportCopyBtn.textContent = '已复制!';
+                setTimeout(() => { aiReportCopyBtn.textContent = '复制报告'; }, 2000);
+            }).catch(err => {
+                console.error('复制失败: ', err);
+            });
+        });
+    }
+
+if (aiAssistantCloseBtn) {
+    aiAssistantCloseBtn.addEventListener('click', () => closeModal(aiAssistantModal));
+}
+
 
         // 确保统计模态框内的时间选择器事件被绑定
     setupStatsTimespanSelectors();
@@ -4140,6 +5081,25 @@ async function requestBackupCheck() {
 
 async function initializeApp() {
     console.log("initializeApp: 开始应用初始化。");
+
+    // AI Assistant & Report Generator Elements
+    aiAssistantBtn = document.getElementById('ai-assistant-btn');
+    aiAssistantModal = document.getElementById('ai-assistant-modal');
+    aiAssistantCloseBtn = document.getElementById('ai-assistant-close-btn');
+    aiModeSelector = document.querySelector('.ai-mode-selector');
+    aiModeAddBtn = document.getElementById('ai-mode-add-btn');
+    aiModeReportBtn = document.getElementById('ai-mode-report-btn');
+    aiAddView = document.getElementById('ai-add-view');
+    aiReportView = document.getElementById('ai-report-view');
+    aiAddLoading = document.getElementById('ai-add-loading');
+    reportOptionsGrid = document.querySelector('.report-options-grid');
+    aiReportOutput = document.getElementById('ai-report-output');
+    aiReportTitle = document.getElementById('ai-report-title');
+    aiReportLoading = document.getElementById('ai-report-loading');
+    aiReportContent = document.getElementById('ai-report-content');
+    aiReportCopyBtn = document.getElementById('ai-report-copy-btn');
+    aiReportBackBtn = document.getElementById('ai-report-back-btn');
+
 statsModal = document.getElementById('stats-modal'); // 确保这行存在且正确
 if (!statsModal) {
     console.error("关键错误：未能获取到 stats-modal 元素！请检查 HTML ID。");
@@ -4242,6 +5202,13 @@ if (!statsModal) {
     versionHistoryModal = document.getElementById('version-history-modal');
     versionHistoryCloseBtn = document.getElementById('version-history-close-btn');
     versionListDiv = document.getElementById('version-list');
+    aiSettingsBtn = document.getElementById('ai-settings-btn');
+    aiAssistantBtn = document.getElementById('ai-assistant-btn');
+    aiAssistantModal = document.getElementById('ai-assistant-modal');
+    aiAssistantCloseBtn = document.getElementById('ai-assistant-close-btn');
+    aiPromptInput = document.getElementById('ai-prompt-input');
+    aiProcessBtn = document.getElementById('ai-process-btn');
+    aiLoadingSpinner = document.getElementById('ai-loading-spinner');
     
     console.log("initializeApp: 所有 DOM 元素已获取。");
 
@@ -4362,5 +5329,6 @@ if ('serviceWorker' in navigator) {
     });
 }
     await requestBackupCheck();
+
 }
 document.addEventListener('DOMContentLoaded', initializeApp);
