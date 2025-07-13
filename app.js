@@ -132,29 +132,34 @@ Today is ${getTodayString()}. The current year is ${new Date().getFullYear()}.
 ALWAYS return only the raw JSON.
 `,
 
-    // --- 1. Key和模型选择的管理 ---
+     // --- 1. Key和模型选择的管理 ---
+    // 【MODIFIED】Added 'deepseek'
     getKeys: () => ({
         openai: localStorage.getItem('openai_api_key'),
-        gemini: localStorage.getItem('gemini_api_key')
+        gemini: localStorage.getItem('gemini_api_key'),
+        deepseek: localStorage.getItem('deepseek_api_key') 
     }),
     saveKey: (provider, key) => localStorage.setItem(`${provider}_api_key`, key),
     
-    getSelectedModel: () => localStorage.getItem('selected_ai_model') || 'openai', // 默认OpenAI
+    // 【MODIFIED】Default to 'deepseek' if available, otherwise 'openai'
+    getSelectedModel: () => localStorage.getItem('selected_ai_model') || 'deepseek', 
     setSelectedModel: (model) => localStorage.setItem('selected_ai_model', model),
 
-     // 统一的解析入口函数 (重构以接受 prompt)
+     // 【MODIFIED】Unified entry point now handles 'deepseek'
     generateAIResponse: async function(userInput, systemPrompt) {
         const selectedModel = this.getSelectedModel();
         if (selectedModel.startsWith('openai')) {
             return this.parseWithOpenAI(userInput, systemPrompt);
         } else if (selectedModel.startsWith('gemini')) {
             return this.parseWithGemini(userInput, systemPrompt);
+        } else if (selectedModel.startsWith('deepseek')) { // New case for DeepSeek
+            return this.parseWithDeepSeek(userInput, systemPrompt);
         } else {
             throw new Error('未选择有效的AI模型。');
         }
     },
     
-    // 重构 OpenAI 解析函数
+    // Unchanged
     parseWithOpenAI: async function(userInput, systemPrompt) {
         const apiKey = this.getKeys().openai;
         if (!apiKey) throw new Error('OpenAI API Key 未设置。');
@@ -176,7 +181,7 @@ ALWAYS return only the raw JSON.
         return result.choices[0].message.content;
     },
 
-    // 重构 Gemini 解析函数
+    // Unchanged
     parseWithGemini: async function(userInput, systemPrompt) {
         const apiKey = this.getKeys().gemini;
         if (!apiKey) throw new Error('Gemini API Key 未设置。');
@@ -184,7 +189,6 @@ ALWAYS return only the raw JSON.
         const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent?key=${apiKey}`;
         const requestBody = {
             "contents": [{ "parts": [{ "text": userInput }] }],
-            // Gemini 的 System Instruction 在这里设置
             "systemInstruction": { "parts": [{ "text": systemPrompt }] },
             "generationConfig": {
                 "temperature": systemPrompt === this.REPORT_SYSTEM_PROMPT ? 0.7 : 0.2
@@ -200,6 +204,32 @@ ALWAYS return only the raw JSON.
         if (!response.ok) throw new Error(`Gemini Error: ${(await response.json()).error.message}`);
         const result = await response.json();
         return result.candidates[0].content.parts[0].text;
+    },
+
+    // 【NEW】Function to handle DeepSeek API (OpenAI compatible)
+    parseWithDeepSeek: async function(userInput, systemPrompt) {
+        const apiKey = this.getKeys().deepseek;
+        if (!apiKey) throw new Error('DeepSeek API Key 未设置。');
+        
+        // Using DeepSeek's endpoint
+        const response = await fetch('https://api.deepseek.com/chat/completions', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+            body: JSON.stringify({
+                model: 'deepseek-chat', // Using the recommended chat model
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    { role: 'user', content: userInput }
+                ],
+            })
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(`DeepSeek Error: ${errorData.error.message || `HTTP ${response.status}`}`);
+        }
+        const result = await response.json();
+        return result.choices[0].message.content;
     }
 };
 
@@ -3612,14 +3642,30 @@ async function handleGenerateReport(reportType) {
     }
 }
 
-
-
 async function showAiSettingsModal() {
-    const { openai: openaiKey, gemini: geminiKey } = aiAssistant.getKeys();
+    // 【MODIFIED】Get the deepseek key as well
+    const { openai: openaiKey, gemini: geminiKey, deepseek: deepseekKey } = aiAssistant.getKeys();
     const selectedModel = aiAssistant.getSelectedModel();
 
     const htmlContent = `
         <div class="ai-settings-container">
+            <!-- DeepSeek Group 【NEW】-->
+            <div class="ai-settings-group">
+                <p class="ai-settings-provider-title">DeepSeek (模型: deepseek-chat)</p>
+                <div id="deepseek-key-display" class="masked-key-wrapper ${deepseekKey ? '' : 'hidden'}">
+                    <span id="masked-deepseek-key">${maskApiKey(deepseekKey)}</span>
+                    <button class="header-action-btn-small" data-provider="deepseek">修改</button>
+                </div>
+                <div id="deepseek-key-input-area" class="ai-key-input-area ${deepseekKey ? 'hidden' : ''}">
+                    <input type="text" id="deepseek-api-key-input" class="custom-prompt-input" placeholder="请输入DeepSeek API Key...">
+                    <button class="custom-prompt-btn custom-prompt-confirm" data-provider="deepseek">验证</button>
+                </div>
+                <p class="api-key-helper-text">
+                    <a href="https://platform.deepseek.com/" target="_blank">点击这里获取密钥</a>
+                </p>
+                <p id="deepseek-status" class="api-status"></p>
+            </div>
+
             <!-- OpenAI Group -->
             <div class="ai-settings-group">
                 <p class="ai-settings-provider-title">OpenAI (模型: o3-mini)</p>
@@ -3631,12 +3677,15 @@ async function showAiSettingsModal() {
                     <input type="text" id="openai-api-key-input" class="custom-prompt-input" placeholder="请输入Openai api key...">
                     <button class="custom-prompt-btn custom-prompt-confirm" data-provider="openai">验证</button>
                 </div>
+                <p class="api-key-helper-text">
+                    <a href="https://platform.openai.com/settings/organization/api-keys" target="_blank">点击这里获取密钥</a>
+                </p>
                 <p id="openai-status" class="api-status"></p>
             </div>
 
             <!-- Gemini Group -->
             <div class="ai-settings-group">
-                <p class="ai-settings-provider-title">Google Gemini (模型: Gemini 2.5 Flash-Lite)</p>
+                <p class="ai-settings-provider-title">Google Gemini (模型: Gemini 1.5 Flash)</p>
                 <div id="gemini-key-display" class="masked-key-wrapper ${geminiKey ? '' : 'hidden'}">
                     <span id="masked-gemini-key">${maskApiKey(geminiKey)}</span>
                     <button class="header-action-btn-small" data-provider="gemini">修改</button>
@@ -3645,6 +3694,9 @@ async function showAiSettingsModal() {
                     <input type="text" id="gemini-api-key-input" class="custom-prompt-input" placeholder="请输入Gemini api key...">
                     <button class="custom-prompt-btn custom-prompt-confirm" data-provider="gemini">验证</button>
                 </div>
+                <p class="api-key-helper-text">
+                    <a href="https://aistudio.google.com/apikey" target="_blank">点击这里获取密钥</a>
+                </p>
                 <p id="gemini-status" class="api-status"></p>
             </div>
 
@@ -3652,8 +3704,10 @@ async function showAiSettingsModal() {
             <div class="ai-settings-group">
                 <p class="ai-settings-provider-title">选择默认使用的AI模型</p>
                 <select id="ai-model-selector" class="header-select" style="width: 100%;">
+                    <!-- 【MODIFIED】Added DeepSeek option -->
+                    <option value="deepseek" ${selectedModel === 'deepseek' ? 'selected' : ''} ${!deepseekKey ? 'disabled' : ''}>DeepSeek (deepseek-chat)</option>
                     <option value="openai" ${selectedModel === 'openai' ? 'selected' : ''} ${!openaiKey ? 'disabled' : ''}>OpenAI (o3-mini)</option>
-                    <option value="gemini" ${selectedModel === 'gemini' ? 'selected' : ''} ${!geminiKey ? 'disabled' : ''}>Google Gemini (2.5 Flash-Lite)</option>
+                    <option value="gemini" ${selectedModel === 'gemini' ? 'selected' : ''} ${!geminiKey ? 'disabled' : ''}>Google Gemini (1.5 Flash)</option>
                 </select>
             </div>
         </div>
@@ -3669,7 +3723,7 @@ async function showAiSettingsModal() {
             const modal = document.getElementById('custom-prompt-modal');
             if (!modal) return;
 
-            // "修改" 按钮逻辑 (无需修改)
+            // "修改" 按钮逻辑 (无需修改, 依然有效)
             modal.querySelectorAll('.masked-key-wrapper button').forEach(btn => {
                 btn.addEventListener('click', () => {
                     const provider = btn.dataset.provider;
@@ -3681,7 +3735,7 @@ async function showAiSettingsModal() {
                 });
             });
 
-            // "验证" 按钮逻辑 (核心修改在这里)
+            // "验证" 按钮逻辑
             modal.querySelectorAll('.ai-key-input-area button').forEach(btn => {
                 btn.addEventListener('click', async () => {
                     const provider = btn.dataset.provider;
@@ -3708,22 +3762,26 @@ async function showAiSettingsModal() {
                                 throw new Error(errorData.error.message || `HTTP ${response.status}`);
                             }
                             isValid = true;
-
                         } else if (provider === 'gemini') {
-                            // --- START OF FIX: Use fetch to validate Gemini Key ---
                             const validationUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${key}`;
                             const response = await fetch(validationUrl);
                             if (!response.ok) {
                                 const errorData = await response.json();
                                 throw new Error(errorData.error.message || `HTTP ${response.status}`);
                             }
-                            // 检查返回的数据是否包含模型列表
                             const data = await response.json();
                             if (!data.models || data.models.length === 0) {
                                 throw new Error("API Key有效，但无可访问的模型。");
                             }
                             isValid = true;
-                            // --- END OF FIX ---
+                        // 【MODIFIED】Added validation logic for DeepSeek
+                        } else if (provider === 'deepseek') {
+                            const response = await fetch('https://api.deepseek.com/models', { headers: { 'Authorization': `Bearer ${key}` } });
+                            if (!response.ok) {
+                                const errorData = await response.json();
+                                throw new Error(errorData.error.message || `HTTP ${response.status}`);
+                            }
+                            isValid = true;
                         }
                         
                         if (isValid) {
@@ -3745,7 +3803,7 @@ async function showAiSettingsModal() {
                 });
             });
 
-            // 模型选择器逻辑 (无需修改)
+            // 模型选择器逻辑 (无需修改, 依然有效)
             const modelSelector = document.getElementById('ai-model-selector');
             if(modelSelector) {
                 modelSelector.addEventListener('change', (e) => {
@@ -3755,6 +3813,9 @@ async function showAiSettingsModal() {
         }
     });
 }
+
+
+
 async function handleAiProcess() {
     const userInput = aiPromptInput.value.trim();
     if (!userInput) return;
