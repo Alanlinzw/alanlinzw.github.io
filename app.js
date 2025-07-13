@@ -4052,7 +4052,7 @@ async function handleExportToNotionClick() {
 async function redirectToNotionAuthPKCE() {
     // 1. 从Notion开发者中心获取您的Client ID
     const NOTION_CLIENT_ID = '22fd872b-594c-802d-bd93-0037133f9480'; // 替换为你的Client ID
-    const REDIRECT_URI = window.location.origin + window.location.pathname; // PWA的当前URL
+    const REDIRECT_URI = 'https://alanlinzw.github.io/efficienTodo_pwa/'; // PWA的当前URL
 
     // 2. 生成并存储 code_verifier
     const codeVerifier = generateCodeVerifier(128);
@@ -4242,8 +4242,13 @@ function htmlToNotionBlocks(htmlString) {
 }
 
 async function executeNotionExport() {
-    // 【核心修改】在函数开始时，就打开一个“正在导出”的提示，而不是修改按钮文字。
-    // 这会覆盖掉所有之前的弹窗，成为当前唯一的信息提示。
+    const exportBtn = document.getElementById('export-to-notion-btn');
+    if (exportBtn) {
+        exportBtn.disabled = true;
+        exportBtn.textContent = "导出中..."; // 早期反馈
+    }
+
+    // 在所有操作前，先打开“正在导出”的提示
     openCustomPrompt({
         title: "正在导出到Notion...",
         message: "请稍候，正在将报告发送到您的Notion工作区。",
@@ -4252,19 +4257,15 @@ async function executeNotionExport() {
         hideCancelButton: true
     });
 
-    // 将按钮状态的修改移到 try...finally 之外，因为我们用弹窗代替了按钮状态
-    const exportBtn = document.getElementById('export-to-notion-btn');
-    if (exportBtn) exportBtn.disabled = true;
-
     try {
         const accessToken = await db.get('notion_access_token');
         const parentId = await db.get('notion_parent_page_id');
-        
-        // 【重要】如果accessToken或parentId不存在，先关闭“导出中”弹窗，再打开选择页面的弹窗
+
         if (!accessToken || !parentId) {
-            closeCustomPrompt(); 
+            closeCustomPrompt();
             await selectNotionParentPage();
-            return; 
+            // 注意：selectNotionParentPage完成后会自己触发导出，所以这里可以直接返回
+            return;
         }
 
         const parentType = await db.get('notion_parent_type');
@@ -4288,19 +4289,16 @@ async function executeNotionExport() {
         if (parentType === 'database') {
             requestBody = {
                 parent: { database_id: parentId },
-                properties: {
-                    // 假设数据库的主标题属性名为'Name'。Notion默认创建的是这个。
-                    // 如果你的模板中改了名字，这里需要同步修改。
-                    'Name': { title: [{ text: { content: reportTitle } }] }
-                },
-                children: notionBlocks
+                properties: { 'Name': { title: [{ text: { content: reportTitle } }] } }
             };
+            // 只有当有内容块时才添加children属性
+            if (notionBlocks.length > 0) {
+                requestBody.children = notionBlocks;
+            }
         } else {
             requestBody = {
                 parent: { page_id: parentId },
-                properties: {
-                    title: { title: [{ text: { content: reportTitle } }] }
-                },
+                properties: { title: { title: [{ text: { content: reportTitle } }] } },
                 children: notionBlocks
             };
         }
@@ -4327,13 +4325,11 @@ async function executeNotionExport() {
             throw new Error(`Notion API Error: ${responseData.message || responseData.error}`);
         }
         
-     // 【核心修改】在显示成功提示前，先关闭“正在导出”的提示
-        closeCustomPrompt();
-
         const newPage = responseData;
         localStorage.removeItem('pendingNotionExport');
 
-        // 延迟一点再显示最终成功提示，避免UI闪烁
+        // 【核心修复】先关闭，然后延迟足够长的时间再打开新的
+        closeCustomPrompt();
         setTimeout(() => {
             openCustomPrompt({
                 title: "导出成功！",
@@ -4341,21 +4337,22 @@ async function executeNotionExport() {
                 hideConfirmButton: true,
                 cancelText: '完成'
             });
-        }, 200);
+        }, 400); // 增加延迟到400毫秒，确保CSS动画(0.3s)完成
 
     } catch (error) {
-        // 【核心修改】在显示错误提示前，也先关闭“正在导出”的提示
+        // 在catch块里也使用同样的模式
         closeCustomPrompt();
-        // 延迟显示错误，避免UI闪烁
         setTimeout(() => {
             openCustomPrompt({ title: "导出失败", message: error.message, confirmText: "好的" });
-        }, 200);
+        }, 400); // 同样增加延迟
     } finally {
         if (exportBtn) {
             exportBtn.disabled = false;
+            exportBtn.textContent = "导出到Notion ✨";
         }
     }
 }
+
 
 let GAPI_INSTANCE = null;
 let GIS_OAUTH2_INSTANCE = null;
