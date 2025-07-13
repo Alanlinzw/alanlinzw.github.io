@@ -4080,6 +4080,8 @@ async function redirectToNotionAuthPKCE() {
     window.location.href = authUrl.toString();
 }
 
+// 在 app.js 中，用这个新版本完整替换掉 selectNotionParentPage
+
 async function selectNotionParentPage(isFirstTime = false) {
     openCustomPrompt({
         title: "选择报告存放位置",
@@ -4092,23 +4094,15 @@ async function selectNotionParentPage(isFirstTime = false) {
     try {
         const accessToken = await db.get('notion_access_token');
         
-        // 【核心修复 1】在发送请求前，严格检查accessToken是否存在。
-        if (!accessToken) {
-            throw new Error("无法找到Notion访问凭证。请返回并重新点击“导出到Notion”以发起授权。");
+        if (!accessToken || typeof accessToken !== 'string' || accessToken.trim() === '') {
+            throw new Error("无效的Notion访问凭证。请重新点击“导出”按钮以发起授权。");
         }
 
         const PROXY_SEARCH_URL = 'https://notion-auth-proxy.martinlinzhiwu.workers.dev/notion-proxy/v1/search';
 
-        // 准备一个即使为空也有效的请求体
-        const searchBody = {
-            filter: {
-                or: [
-                    { property: 'object', value: 'page' },
-                    { property: 'object', value: 'database' }
-                ]
-            },
-            sort: { direction: 'ascending', timestamp: 'last_edited_time' }
-        };
+        // 【核心修复】根据Notion API文档，发送一个空的JSON对象作为请求体，
+        // 以获取所有该集成有权访问的页面和数据库。
+        const searchBody = {}; 
 
         const response = await fetch(PROXY_SEARCH_URL, {
             method: 'POST',
@@ -4117,22 +4111,19 @@ async function selectNotionParentPage(isFirstTime = false) {
                 'Notion-Version': '2022-06-28',
                 'Content-Type': 'application/json'
             },
-            // 【核心修复 2】确保body始终是一个有效的JSON字符串。
             body: JSON.stringify(searchBody)
         });
 
         const data = await response.json();
 
-        // 【核心修复 3】更精细地处理错误响应
         if (!response.ok) {
-            // 如果错误信息在data.error里，就用它，否则用通用的HTTP状态文本
-            const errorMessage = data.error || `请求失败，状态码: ${response.status} ${response.statusText}`;
-            throw new Error(errorMessage);
+            const errorMessage = data.message || data.error || `请求失败，状态码: ${response.status}`;
+            throw new Error(`Notion Search Error: ${errorMessage}`);
         }
         
         const pages = data.results;
 
-        // ... 后续的页面选择逻辑保持不变 ...
+        // 后续的页面选择逻辑完全不需要改变
         if (pages.length === 0) {
             closeCustomPrompt();
             openCustomPrompt({
@@ -4193,7 +4184,6 @@ async function selectNotionParentPage(isFirstTime = false) {
         openCustomPrompt({ title: "加载页面失败", message: error.message, confirmText: '好的' });
     }
 }
-
 /**
  * Parses an HTML string into an array of Notion block objects.
  */
