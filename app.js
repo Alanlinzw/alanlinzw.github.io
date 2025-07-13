@@ -4091,18 +4091,24 @@ async function selectNotionParentPage(isFirstTime = false) {
 
     try {
         const accessToken = await db.get('notion_access_token');
-        
-        // 调用Notion搜索API
-        const response = await fetch('https://api.notion.com/v1/search', {
+        if (!accessToken) {
+            throw new Error("无法找到Notion访问凭证，请重新授权。");
+        }
+
+        // 定义代理的/search路径
+        const PROXY_SEARCH_URL = 'https://notion-auth-proxy.martinlinzhiwu.workers.dev/notion-proxy/v1/search';
+
+        // 通过代理调用Notion的搜索API
+        const response = await fetch(PROXY_SEARCH_URL, {
             method: 'POST',
             headers: {
+                // 将必要的头信息发送给我们的代理
                 'Authorization': `Bearer ${accessToken}`,
                 'Notion-Version': '2022-06-28',
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify({
                 filter: {
-                    // 只搜索用户可以作为父页面的页面或数据库
                     or: [
                         { property: 'object', value: 'page' },
                         { property: 'object', value: 'database' }
@@ -4112,9 +4118,12 @@ async function selectNotionParentPage(isFirstTime = false) {
             })
         });
 
-        if (!response.ok) throw new Error("无法获取Notion页面列表。");
-        
         const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error || "无法通过代理获取Notion页面列表。");
+        }
+        
         const pages = data.results;
 
         if (pages.length === 0) {
@@ -4134,12 +4143,12 @@ async function selectNotionParentPage(isFirstTime = false) {
                 <option value="">-- 请选择 --</option>
                 ${pages.map(page => {
                     const title = page.properties.title?.title[0]?.plain_text || page.title?.[0]?.plain_text || '无标题页面';
-                    const icon = page.icon?.emoji || '📄';
+                    const icon = page.icon?.emoji || (page.object === 'database' ? '🗂️' : '📄');
                     return `<option value="${page.id}">${icon} ${title}</option>`;
                 }).join('')}
             </select>`;
 
-        // 更新prompt内容
+        // 更新prompt内容以显示选择器
         closeCustomPrompt();
         openCustomPrompt({
             title: "选择报告存放位置",
@@ -4149,20 +4158,31 @@ async function selectNotionParentPage(isFirstTime = false) {
                 const selector = document.getElementById('notion-page-selector');
                 const selectedPageId = selector.value;
                 if (!selectedPageId) {
-                    alert("请选择一个页面！");
+                    // 使用 alert 或更友好的提示方式
+                    const promptContent = document.querySelector('#custom-prompt-modal .custom-prompt-content p');
+                    if (promptContent) {
+                        promptContent.style.color = 'var(--danger-color)';
+                        promptContent.textContent = '请务必选择一个页面或数据库！';
+                    }
                     return false; // 阻止prompt关闭
                 }
                 
                 await db.set('notion_parent_page_id', selectedPageId);
                 const parentType = pages.find(p => p.id === selectedPageId)?.object;
-                await db.set('notion_parent_type', parentType); // 存储父级类型 ('page' or 'database')
+                await db.set('notion_parent_type', parentType);
 
-                openCustomPrompt({ title: "设置成功！", message: "您的Notion已设置完成，现在可以导出了。", confirmText: "太棒了！" });
+                closeCustomPrompt(); // 先关闭选择框
 
-                // 如果是首次设置后，自动触发一次导出
-                if (isFirstTime) {
-                   setTimeout(executeNotionExport, 500);
-                }
+                // 延迟一点再显示成功提示，体验更好
+                setTimeout(() => {
+                    openCustomPrompt({ title: "设置成功！", message: "您的Notion已设置完成，现在可以导出了。", confirmText: "太棒了！" });
+                    // 如果是首次设置后，自动触发一次导出
+                    if (isFirstTime) {
+                       setTimeout(executeNotionExport, 500);
+                    }
+                }, 200);
+
+                return true; // 确认关闭
             }
         });
 
@@ -4171,7 +4191,6 @@ async function selectNotionParentPage(isFirstTime = false) {
         openCustomPrompt({ title: "加载页面失败", message: error.message, confirmText: '好的' });
     }
 }
-
 /**
  * Parses an HTML string into an array of Notion block objects.
  */
@@ -4230,8 +4249,10 @@ function htmlToNotionBlocks(htmlString) {
  */
 async function executeNotionExport() {
     const exportBtn = document.getElementById('export-to-notion-btn');
-    exportBtn.disabled = true;
-    exportBtn.textContent = "导出中...";
+    if (exportBtn) {
+        exportBtn.disabled = true;
+        exportBtn.textContent = "导出中...";
+    }
 
     try {
         const accessToken = await db.get('notion_access_token');
@@ -4239,34 +4260,38 @@ async function executeNotionExport() {
         const parentType = await db.get('notion_parent_type');
 
         if (!accessToken || !parentId) {
-            // 如果信息不全，则重新引导用户设置
             await selectNotionParentPage();
             return; 
         }
 
-        // 恢复之前保存的报告内容
         const pendingExportRaw = localStorage.getItem('pendingNotionExport');
-        if (!pendingExportRaw) throw new Error("找不到待导出的报告内容。");
-        const pendingExport = JSON.parse(pendingExportRaw);
+        if (!pendingExportRaw) {
+            // 如果localStorage没有，就从当前UI获取，作为备用方案
+            const currentTitle = aiReportTitle.textContent;
+            const currentContent = aiReportContent.innerHTML;
+            if(!currentTitle || !currentContent) {
+                throw new Error("找不到待导出的报告内容。请重新生成报告。");
+            }
+            localStorage.setItem('pendingNotionExport', JSON.stringify({ title: currentTitle, content: currentContent }));
+        }
         
+        const pendingExport = JSON.parse(localStorage.getItem('pendingNotionExport'));
         const reportTitle = pendingExport.title;
         const reportHtml = pendingExport.content;
         const notionBlocks = htmlToNotionBlocks(reportHtml);
 
         let requestBody;
         if (parentType === 'database') {
-            // 如果父级是数据库，创建数据库条目
             requestBody = {
                 parent: { database_id: parentId },
                 properties: {
-                    // 假设数据库的主标题属性名为'Name'或'报告名称'
-                    // 需要根据你的模板调整
+                    // 假设数据库的主标题属性名为'Name'。Notion默认创建的是这个。
+                    // 如果你的模板中改了名字，这里需要同步修改。
                     'Name': { title: [{ text: { content: reportTitle } }] }
                 },
                 children: notionBlocks
             };
         } else {
-            // 如果父级是页面，创建子页面
             requestBody = {
                 parent: { page_id: parentId },
                 properties: {
@@ -4275,8 +4300,10 @@ async function executeNotionExport() {
                 children: notionBlocks
             };
         }
+        
+        const PROXY_PAGES_URL = 'https://notion-auth-proxy.martinlinzhiwu.workers.dev/notion-proxy/v1/pages';
 
-        const response = await fetch('https://api.notion.com/v1/pages', {
+        const response = await fetch(PROXY_PAGES_URL, {
             method: 'POST',
             headers: {
                 'Authorization': `Bearer ${accessToken}`,
@@ -4286,21 +4313,22 @@ async function executeNotionExport() {
             body: JSON.stringify(requestBody)
         });
 
+        const responseData = await response.json();
+
         if (!response.ok) {
-            const errorData = await response.json();
-            if (errorData.code === 'invalid_grant' || errorData.code === 'unauthorized') {
-                 await db.set('notion_access_token', null); // 清除过期的token
-                 throw new Error("Notion授权已过期或失效，请重新授权。");
+            if (responseData.code === 'invalid_grant' || responseData.code === 'unauthorized' || response.status === 401) {
+                 await db.set('notion_access_token', null);
+                 throw new Error("Notion授权已过期或失效，请点击“导出”按钮重新授权。");
             }
-            throw new Error(`Notion API Error: ${errorData.message}`);
+            throw new Error(`Notion API Error: ${responseData.message || responseData.error}`);
         }
         
-        const newPage = await response.json();
-        localStorage.removeItem('pendingNotionExport'); // 成功后清除
+        const newPage = responseData;
+        localStorage.removeItem('pendingNotionExport');
 
         openCustomPrompt({
             title: "导出成功！",
-            htmlContent: `<p>报告已成功导出到Notion。</p><a href="${newPage.url}" target="_blank" class="custom-prompt-btn custom-prompt-confirm" style="display:inline-block; margin-top:10px;">在Notion中查看</a>`,
+            htmlContent: `<p>报告已成功导出到Notion。</p><a href="${newPage.url}" target="_blank" class="custom-prompt-btn custom-prompt-confirm" style="display:inline-block; margin-top:10px; text-decoration:none;">在Notion中查看</a>`,
             hideConfirmButton: true,
             cancelText: '完成'
         });
@@ -4308,8 +4336,10 @@ async function executeNotionExport() {
     } catch (error) {
         openCustomPrompt({ title: "导出失败", message: error.message, confirmText: "好的" });
     } finally {
-        exportBtn.disabled = false;
-        exportBtn.textContent = "导出到Notion ✨";
+        if (exportBtn) {
+            exportBtn.disabled = false;
+            exportBtn.textContent = "导出到Notion ✨";
+        }
     }
 }
 
@@ -5716,9 +5746,11 @@ async function handleNotionCallback() {
     const authCode = urlParams.get('code');
 
     if (authCode) {
-        const PWA_URL = 'https://alanlinzw.github.io/'; // 【重要】你的PWA的固定URL
+        // 使用一个固定的、权威的PWA URL来清理地址栏
+        const PWA_URL = 'https://alanlinzw.github.io/efficienTodo_pwa/'; // 你的PWA的固定URL
         window.history.replaceState({}, document.title, PWA_URL);
 
+        // 显示加载提示
         openCustomPrompt({
             title: "正在完成Notion授权...",
             message: "请稍候，正在通过安全代理验证您的授权信息。",
@@ -5728,35 +5760,30 @@ async function handleNotionCallback() {
         });
 
         try {
-            // PKCE的 verifier 仍然需要
-            const codeVerifier = await db.get('notion_code_verifier');
-            await db.set('notion_code_verifier', null);
+            // 定义你的Worker代理URL
+            const PROXY_URL = 'https://notion-auth-proxy.martinlinzhiwu.workers.dev/exchange-token';
 
-            // 【核心修改】请求你自己的Worker代理，而不是Notion
-            const PROXY_URL = 'https://notion-auth-proxy.martinlinzhiwu.workers.dev/'; // 替换为你的Worker URL
-            const proxyUrl = new URL(PROXY_URL);
-            proxyUrl.searchParams.append('code', authCode);
-            // 如果你的Worker需要verifier，也一起传过去
-            if (codeVerifier) {
-                proxyUrl.searchParams.append('verifier', codeVerifier);
-            }
-            
-            const response = await fetch(proxyUrl.toString(), {
-                method: "POST" // 或者 "GET"，取决于你的Worker如何设计接收参数
+            // 通过代理，使用POST方法在请求体中发送code
+            const response = await fetch(PROXY_URL, {
+                method: "POST",
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code: authCode })
             });
 
             const tokenData = await response.json();
 
+            // 检查代理返回的响应是否成功
             if (!response.ok || tokenData.error) {
-                throw new Error(tokenData.error || "从代理服务器获取Token失败。");
+                throw new Error(tokenData.error || "从代理服务器获取Token失败。请检查Worker日志。");
             }
             
-            // 后续逻辑保持不变
+            // 存储获取到的token
             await db.set('notion_access_token', tokenData.access_token);
             await db.set('notion_workspace_id', tokenData.workspace_id);
             
+            // 关闭加载提示，进入下一步：选择页面
             closeCustomPrompt();
-            await selectNotionParentPage(true);
+            await selectNotionParentPage(true); // 传入true表示这是首次设置
 
         } catch (error) {
             closeCustomPrompt();
