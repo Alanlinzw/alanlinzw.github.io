@@ -1650,8 +1650,30 @@ body { padding-bottom: 80px; }
     box-shadow: var(--shadow-sm);
 }
 
+/* 1. 让所有 ai-view 都成为 flex 容器，并能伸展 */
 .ai-view {
-    /* 视图容器，不需要太多样式，主要用于JS控制显示/隐藏 */
+    display: flex;
+    flex-direction: column; /* 内部元素垂直排列 */
+    flex-grow: 1; /* 【核心】允许视图容器填充所有可用垂直空间 */
+}
+
+/* 2. 让“智能添加”的文本区域也能伸展 */
+#ai-add-view .custom-prompt-input-area {
+    flex-grow: 1; /* 占据所有可用空间 */
+    display: flex; /* 让内部的 textarea 也能伸展 */
+}
+#ai-add-view .custom-prompt-input-area textarea {
+    flex-grow: 1; /* textarea 填满其父容器 */
+}
+
+/* 3. 让“生成报告”的输出区域也能伸展 */
+#ai-report-view #ai-report-output {
+    flex-grow: 1; /* 占据所有可用空间 */
+    display: flex;
+    flex-direction: column;
+}
+#ai-report-view #ai-report-output .report-content-area {
+    flex-grow: 1; /* 报告内容区域填满其父容器 */
 }
 
 /* 确保AI助手的加载动画ID正确 */
@@ -1663,28 +1685,27 @@ body { padding-bottom: 80px; }
 }
 
 /* ==========================================================================
-   34. AI MODAL WIDTH CONSISTENCY FIX
+   34. AI MODAL WIDTH CONSISTENCY FIX (MOBILE-AWARE)
    ========================================================================== */
 
 /* 
-  为AI助手模态框的内容区设置一个最小宽度和默认宽度。
-  这样可以确保无论在哪个视图下，弹窗都保持一个统一、美观的宽度。
+  默认情况下（移动端），让模态框宽度自适应，不要设置固定宽度。
+  max-width 会确保它不会超出屏幕。
+  我们之前的 .modal-content 已经有 max-width: 90vw; 这个规则就足够了。
 */
 #ai-assistant-modal .modal-content {
-    /* 
-     * 设置一个默认宽度，这会成为大部分情况下的实际宽度。
-     * 700px 是一个比较宽敞的值，可以根据您的喜好调整为 600px 或 650px。
-     */
-    width: 650px; 
-    
-    /* 
-     * 设置一个最小宽度，防止在内容极少时（如报告选项视图）过度收缩。
-     * 这个值通常比默认宽度小一些。
-     */
-    min-width: 500px; 
-    
-    /* 
-     * max-width 保持不变，确保在小屏幕上不会超出视口。
-     * 我们之前已经设置了 max-width: 700px; 这里无需改动。
-     */
+    /* 移除或注释掉桌面端的固定宽度 */
+    /* width: 650px; */
+    /* min-width: 500px; */
 }
+
+/* 
+  【核心修复】只在屏幕宽度大于等于769px时（桌面端），才应用固定宽度。
+*/
+@media (min-width: 769px) {
+    #ai-assistant-modal .modal-content {
+        width: 650px; 
+        min-width: 500px; 
+    }
+}
+
