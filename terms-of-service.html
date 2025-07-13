@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Terms of Service - EfficienTodo</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.7;
+            color: #333;
+            max-width: 800px;
+            margin: 40px auto;
+            padding: 0 20px;
+            background-color: #f9f9f9;
+        }
+        h1, h2, h3 {
+            color: #1a202c;
+            border-bottom: 1px solid #e2e8f0;
+            padding-bottom: 10px;
+            margin-top: 2.5em;
+        }
+        h1 {
+            text-align: center;
+            border: none;
+            margin-bottom: 1.5em;
+        }
+        p {
+            margin-bottom: 1em;
+        }
+        ul {
+            padding-left: 20px;
+        }
+        li {
+            margin-bottom: 0.5em;
+        }
+        strong {
+            color: #2d3748;
+        }
+        .container {
+            background-color: #ffffff;
+            padding: 30px 40px;
+            border-radius: 8px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+        }
+        .meta-info {
+            text-align: center;
+            color: #718096;
+            margin-bottom: 2em;
+            font-size: 0.9em;
+        }
+        a {
+            color: #3B82F6;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>Terms of Service for EfficienTodo</h1>
+        <p class="meta-info">Last Updated: July 13, 2025</p>
+
+        <p>Welcome to EfficienTodo ("the Application")! Before using the Application, please read these Terms of Service ("Terms") carefully. By accessing or using the Application, you agree to be bound by these Terms.</p>
+
+        <h2>1. Service Description</h2>
+        <p>The Application is a Progressive Web App (PWA) designed to help you manage your tasks, plans, and finances. Key features include task management, cloud synchronization, and an AI assistant. The Application operates primarily within your web browser, leveraging modern browser technologies to provide offline access and data storage.</p>
+
+        <h2>2. Data Storage and Privacy</h2>
+        <ul>
+            <li><strong>Local Storage</strong>: By default, all your core data (tasks, ledger entries, history, etc.) is stored in your device's local browser database (IndexedDB). This means you can access and modify your data even when offline. We do not have access to any data stored locally in your browser.</li>
+            <li><strong>Cloud Sync (Google Drive)</strong>: To enable data backup and cross-device synchronization, the Application offers integration with your personal Google Drive account. When you choose to enable Cloud Sync:
+                <ul>
+                    <li>You will authorize the Application to create and manage a specific file named <code>efficienTodoData.json</code> within your Google Drive.</li>
+                    <li>All your application data will be transmitted (encrypted in transit) and stored within this file.</li>
+                    <li><strong>The Application and its developers cannot access, view, or share any other files in your Google Drive account.</strong> The authorization scope is strictly limited to the specific file created and managed by the Application.</li>
+                </ul>
+            </li>
+             <li><strong>No Personal Data Collection</strong>: The Application itself is serverless and does not collect or store any Personally Identifiable Information (PII) such as your name or email address.</li>
+        </ul>
+
+        <h2>3. Third-Party Service Integrations</h2>
+        <p>To provide enhanced functionality, the Application may integrate with third-party services, such as Google Gemini, OpenAI, DeepSeek, and Notion. When you choose to use these integrated features:</p>
+        <ul>
+            <li><strong>AI Assistant</strong>: When you use AI-powered features (e.g., Smart Add, Generate Report), the text you input and relevant task data will be sent to the API of the AI service provider you have selected (Google, OpenAI, or DeepSeek). This process is subject to the privacy policies and terms of service of the respective API provider. The Application does not store your API keys; they are saved only in your browser's local storage.</li>
+            <li><strong>Export to Notion</strong>: When you authorize the Application to access your Notion account:
+                <ul>
+                    <li>You will go through Notion's official OAuth 2.0 authorization flow, where you will explicitly select and grant the Application access to one or more specific pages or databases.</li>
+                    <li>The Application can only access the content you have explicitly authorized and cannot access anything else in your workspace.</li>
+                    <li>Your Notion access token will be stored securely in your browser's local database to facilitate future export operations.</li>
+                    <li>You can revoke the Application's access at any time from your Notion account settings.</li>
+                </ul>
+            </li>
+        </ul>
+        <p>We recommend you review the privacy policies and terms of service of these third-party services before using them.</p>
+
+        <h2>4. Your Responsibilities</h2>
+        <ul>
+            <li>You are solely responsible for the legality, accuracy, and security of all content you enter, store, and synchronize using the Application.</li>
+            <li>Please safeguard your Google account, Notion account, and any API keys you configure. The Application is not liable for any data leakage or loss resulting from your failure to protect your credentials.</li>
+            <li>You agree not to use the Application for any illegal activities or to infringe upon the rights of others.</li>
+        </ul>
+
+        <h2>5. Service Interruption and Termination</h2>
+        <p>We strive to provide a stable and reliable service but cannot guarantee that the service will be uninterrupted. Service may be temporarily suspended or limited due to factors beyond our control, such as browser updates, changes in third-party APIs, or network issues. We reserve the right to modify, suspend, or terminate all or part of the service at any time without prior notice.</p>
+
+        <h2>6. Disclaimer of Warranties</h2>
+        <p>To the fullest extent permitted by law, the Application is provided "as is" and "as available." We make no warranties, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose, and non-infringement. We are not liable for any direct or indirect damages arising from the use or inability to use the Application.</p>
+
+        <h2>7. Changes to Terms</h2>
+        <p>We may revise these Terms from time to time. If we make a material change, we may notify you through an in-app announcement or changelog. We encourage you to review the latest version of these Terms periodically. Your continued use of the Application after any changes constitutes your acceptance of the revised Terms.</p>
+
+        <h2>8. Contact Us</h2>
+        <p>If you have any questions about these Terms, please contact us at: <a href="mailto:martinlinzhiwu@gmail.com">martinlinzhiwu@gmail.com</a></p>
+    </div>
+
+</body>
+</html>
