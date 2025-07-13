@@ -5216,35 +5216,23 @@ if (!statsModal) {
     bindEventListeners();
     console.log("initializeApp: 事件监听器已绑定。");
 
-    // 3. 加载非数据设置
+  // 加载非数据设置
     loadTheme();
     await loadNotificationSetting();
-    console.log("initializeApp: 主题和通知设置已加载。");
 
-    // 4. 加载 Google API
-  try {
+    // 预加载 Google API，但不进行任何同步操作
+    try {
         await loadGoogleApis();
     } catch (error) {
         console.error("initializeApp: 启动时加载 Google API 失败:", error);
-        if (syncStatusSpan) syncStatusSpan.textContent = 'Google 服务加载失败。';
     }
 
+    // 只从本地DB加载数据并渲染，不执行任何自动同步或维护
     try {
-        // 【第1步】先从本地加载数据，让用户能立刻看到内容，避免白屏
         await loadTasks();
-        console.log("initializeApp: 任务已从本地 DB 加载，UI将首先渲染此版本。");
-        renderAllLists();
-        
-        // 【第2步】在后台启动强制云端同步流程
-        // 这个函数会处理UI状态，并在完成后刷新列表
-        await syncWithCloudOnStartup();
-
-        
-
+        console.log("initializeApp: 任务已从本地 DB 加载。UI将显示上次会话的状态。");
     } catch (e) {
-        console.error("initializeApp: 初始数据加载或处理时发生严重错误:", e);
-        openCustomPrompt({ title: "加载数据失败", message: `无法加载或处理您的数据：${e.message}`, inputType: 'none', confirmText: '好的', hideCancelButton: true });
-        return; // 关键：如果数据加载失败，终止初始化
+        console.error("initializeApp: 初始数据加载失败:", e);
     }
 
     // 7. 渲染和最终设置
