@@ -1526,8 +1526,30 @@ body { padding-bottom: 80px; }
 .api-status.error { color: var(--danger-color); font-weight: 500; }
 
 /* ==========================================================================
-   31. AI SETTINGS MODAL HEIGHT ADJUSTMENT (COMPACT LAYOUT)
+   31. AI SETTINGS MODAL HEIGHT & LAYOUT ADJUSTMENT
    ========================================================================== */
+
+/* 
+ * --- 核心修复：限制高度并启用滚动 ---
+ * 我们选择 .custom-prompt-input-area 作为目标，因为在您的 onRender 逻辑中，
+ * .ai-settings-container 被直接插入到了这个区域。
+ */
+#custom-prompt-modal .custom-prompt-input-area {
+    /* 1. 设置一个基于视口高度的最大值。
+     *    例如，60vh 意味着最大高度为屏幕可见高度的60%。
+     *    这是一个非常灵活的值，能适应各种屏幕尺寸。
+     */
+    max-height: 60vh;
+
+    /* 2. 当内容超出 max-height 时，自动显示垂直滚动条。*/
+    overflow-y: auto;
+
+    /* 3. 优化滚动条右侧的内边距，防止内容紧贴滚动条。*/
+    padding-right: var(--spacing-sm); 
+}
+
+
+/* --- 优化：使布局更紧凑，减少垂直空间占用 --- */
 
 /* 1. 减小AI设置主容器的内边距 */
 #custom-prompt-modal .ai-settings-container {
@@ -1537,17 +1559,32 @@ body { padding-bottom: 80px; }
 
 /* 2. 减小每个设置组之间的垂直间距 */
 .ai-settings-container {
-    gap: var(--spacing-md); /* 使用中等间距，而不是之前的大间距(lg) */
+    gap: var(--spacing-md); /* 使用中等间距(15px)，而不是之前的大间距(lg) */
 }
 
 /* 3. 减小每个组内标题和控件之间的间距 */
 .ai-settings-provider-title {
-    margin-bottom: var(--spacing-xs); /* 使用超小间距 */
+    margin-bottom: var(--spacing-xs); /* 使用超小间距(5px) */
 }
 
 /* 4. 减小状态文本与上方控件的间距 */
 .api-status {
     margin-top: 2px;
+}
+
+/* 5. (可选) 优化滚动条在不同浏览器下的外观 */
+#custom-prompt-modal .custom-prompt-input-area::-webkit-scrollbar {
+  width: 8px;
+}
+
+#custom-prompt-modal .custom-prompt-input-area::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#custom-prompt-modal .custom-prompt-input-area::-webkit-scrollbar-thumb {
+  background-color: var(--control-border-color);
+  border-radius: var(--border-radius-pill);
+  border: 2px solid var(--modal-bg);
 }
 
 /* ==========================================================================
@@ -1709,3 +1746,20 @@ body { padding-bottom: 80px; }
     }
 }
 
+/* AI助手设置中的帮助链接样式 */
+.api-key-helper-text {
+    font-size: 0.8rem;
+    color: var(--color-text-secondary);
+    text-align: right;
+    margin-top: 4px;
+    margin-bottom: 8px;
+}
+
+.api-key-helper-text a {
+    color: var(--color-primary);
+    text-decoration: none;
+}
+
+.api-key-helper-text a:hover {
+    text-decoration: underline;
+}
