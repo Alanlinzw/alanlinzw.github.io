@@ -3960,12 +3960,16 @@ const triggerSync = () => {
     // 使用防抖，避免短时间内（如快速切换窗口）重复触发
     clearTimeout(syncTimeout);
     syncTimeout = setTimeout(() => {
-        const syncButton = document.getElementById('sync-drive-btn');
-        if (syncButton && !syncButton.disabled) {
-            console.log('Visibility change or focus detected, triggering auto-sync.');
-            syncButton.click(); // 模拟点击同步按钮
+        if (isDataDirty) { 
+            console.log('Visibility change detected and data is dirty, triggering auto-sync.');
+            const syncButton = document.getElementById('sync-drive-btn');
+            if (syncButton && !syncButton.disabled) {
+                syncButton.click();
+            }
+        } else {
+            console.log('Visibility change detected, but data is clean. Skipping sync.');
         }
-    }, 1000); // 延迟1秒触发
+    }, 1000); 
 };
 
 // 当页面变为可见时触发同步
@@ -4028,6 +4032,15 @@ window.addEventListener('focus', triggerSync);
                 await db.set('isFirstSyncCompleted', true);
 
             } else {
+                    // 【核心修改】在上传前再次检查
+    if (!isDataDirty) {
+        console.log("日常同步：数据未修改，取消上传。");
+        syncStatusSpan.textContent = '数据已是最新';
+        // 注意：因为我们在这里提前退出了，需要手动处理UI状态
+        syncDriveBtn.disabled = false; // 重新启用按钮
+        setTimeout(() => { syncStatusSpan.textContent = ''; }, 3000);
+        return; // 提前退出，不执行上传
+    }
                 // *** 这是日常同步的逻辑：上传本地更新 ***
                 console.log("日常同步：将上传本地数据。");
                 syncStatusSpan.textContent = '正在上传到云端...';
