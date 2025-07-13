@@ -3980,44 +3980,74 @@ window.addEventListener('focus', triggerSync);
 
     // 【全新、简化的手动同步逻辑】
     if (syncDriveBtn && syncStatusSpan) {
-        syncDriveBtn.addEventListener('click', async () => {
-            if (autoSyncTimer) {
-                clearTimeout(autoSyncTimer);
-                autoSyncTimer = null;
-                console.log('手动同步已启动，待处理的自动同步已取消。');
-            }
-    
-            console.log("手动同步按钮被点击：将上传本地数据。");
-            syncStatusSpan.textContent = '准备上传...';
-            syncDriveBtn.disabled = true;
-            let syncSucceeded = false;
-    
-            try {
-                // 在上传前，最后执行一次自动维护，确保上传的是最新状态
-                await runAutomaticUpkeepTasks();
+    syncDriveBtn.addEventListener('click', async () => {
+        if (autoSyncTimer) {
+            clearTimeout(autoSyncTimer);
+            autoSyncTimer = null;
+        }
 
-                // --- 认证与文件查找 ---
-                if (!driveSync.tokenClient) await loadGoogleApis();
-                const token = driveSync.gapi.client.getToken();
-                if (token === null) await driveSync.authenticate();
-                await driveSync.findOrCreateFile();
-                if (!driveSync.driveFileId) throw new Error('手动同步失败：未找到云端文件。');
+        console.log("同步流程开始...");
+        syncStatusSpan.textContent = '开始同步...';
+        syncDriveBtn.disabled = true;
+        let syncSucceeded = false;
+
+        try {
+            // --- 步骤 1: 认证与文件查找 ---
+            syncStatusSpan.textContent = '连接云端...';
+            if (!driveSync.tokenClient) await loadGoogleApis();
+            const token = driveSync.gapi.client.getToken();
+            if (token === null) await driveSync.authenticate();
+            await driveSync.findOrCreateFile();
+            if (!driveSync.driveFileId) throw new Error('同步失败：未找到云端文件。');
+
+            // --- 步骤 2: 下载云端数据 ---
+            syncStatusSpan.textContent = '下载云端数据...';
+            const cloudData = await driveSync.download();
+            
+            // --- 步骤 3: 确定基础数据 (以云端为准) ---
+            let baseData;
+            const isCloudDataValid = cloudData && typeof cloudData === 'object' && Object.keys(cloudData).length > 0;
+            
+            if (isCloudDataValid) {
+                console.log("同步：使用云端数据作为基础。");
+                baseData = cloudData;
+            } else {
+                console.log("同步：云端无数据，使用本地数据作为基础。");
+                baseData = allTasks; // 使用内存中的当前本地数据
+            }
+            
+            // 将基础数据赋给全局变量，这样维护任务就在最新的数据上操作了
+            allTasks = baseData;
+
+            // --- 步骤 4: 在最新的数据基础上执行自动维护任务 ---
+            syncStatusSpan.textContent = '处理本地任务...';
+            console.log("同步：在最新数据上执行自动维护任务。");
+            let dataWasChangedByUpkeep = false;
+            if (cleanupDailyTasks()) dataWasChangedByUpkeep = true;
+            if (checkAndMoveFutureTasks()) dataWasChangedByUpkeep = true;
+            
+            // 如果维护任务修改了数据，时间戳会通过 saveTasks 更新
+            if(dataWasChangedByUpkeep) {
+                console.log("维护任务修改了数据，保存并准备上传。");
+                // **注意**：这里的 saveTasks() 会更新时间戳，这是正确的，因为它反映了维护任务的修改
+                await saveTasks(); 
+            }
+
+            // --- 步骤 5: 上传最终合并了维护结果的数据 ---
+            syncStatusSpan.textContent = '上传最终数据...';
+            const uploadResult = await driveSync.upload(allTasks);
+            syncStatusSpan.textContent = uploadResult.message;
+            
+            // --- 步骤 6: 流程收尾 ---
+            await db.set('allTasks', allTasks); // 确保DB也更新为最终状态
+            const isFirstSyncCompleted = await db.get('isFirstSyncCompleted');
+            if (isFirstSyncCompleted !== true) {
+                await db.set('isFirstSyncCompleted', true);
+            }
+            syncSucceeded = true;
+            
+        } catch (error) {
     
-                // --- 直接上传本地数据 ---
-                // allTasks.lastModifiedTimestamp 已经被 saveTasks() 在修改时正确设置了
-                syncStatusSpan.textContent = '正在上传到云端...';
-                const uploadResult = await driveSync.upload(allTasks);
-                syncStatusSpan.textContent = uploadResult.message;
-                
-                // 标记首次同步已完成（如果之前未完成的话）
-                const isFirstSyncCompleted = await db.get('isFirstSyncCompleted');
-                if (isFirstSyncCompleted !== true) {
-                    await db.set('isFirstSyncCompleted', true);
-                }
-                
-                syncSucceeded = true;
-    
-            } catch (error) {
                 console.error("手动同步操作失败:", error);
                 const errorMessage = error.message || '未知错误';
                 syncStatusSpan.textContent = `同步错误: ${errorMessage.substring(0, 40)}...`;
@@ -4029,11 +4059,11 @@ window.addEventListener('focus', triggerSync);
                     hideCancelButton: true
                 });
             } finally {
-                syncDriveBtn.disabled = false;
-                console.log("Sync: 同步流程结束，按钮已重新启用。");
-                if (syncSucceeded) {
-                    isDataDirty = false;
-                    updateSyncIndicator();
+            syncDriveBtn.disabled = false;
+            if (syncSucceeded) {
+                isDataDirty = false; // 同步成功后，数据是“干净”的
+                renderAllLists(); // 最后刷新一次UI
+                updateSyncIndicator();
                 const timeString = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
                 localStorage.setItem('lastSyncTime', timeString);
                 setTimeout(() => { 
