@@ -5239,22 +5239,7 @@ if (!statsModal) {
         // 这个函数会处理UI状态，并在完成后刷新列表
         await syncWithCloudOnStartup();
 
-        // 【第3步】在同步完成后，基于最新的数据执行自动维护任务
-        console.log("initializeApp: 在同步后的数据上执行自动维护任务...");
         
-        let upkeepChangedData = false;
-        if (cleanupDailyTasks()) upkeepChangedData = true;
-        
-        // 之前版本的 checkAndMoveFutureTasks 会自动保存，我们需要统一控制
-        const moved = checkAndMoveFutureTasks(); // 此函数现在只移动数据，不保存
-        if (moved) upkeepChangedData = true;
-        
-        // 如果任何维护任务修改了数据，则进行一次保存
-        if (upkeepChangedData) {
-            console.log("initializeApp: 自动维护任务修改了数据，正在保存...");
-            await saveTasks(); // 这会更新时间戳并标记为 dirty
-            renderAllLists(); // 再次渲染以显示维护任务的结果
-        }
 
     } catch (e) {
         console.error("initializeApp: 初始数据加载或处理时发生严重错误:", e);
