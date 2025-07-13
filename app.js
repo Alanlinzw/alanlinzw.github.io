@@ -673,6 +673,74 @@ let statsBtn, statsModal, statsModalCloseBtn, faqBtn, faqModal, faqModalCloseBtn
 // (保持你现有的这部分代码不变，直到 bindEventListeners)
 // ========================================================================
 
+async function syncWithCloudOnStartup() {
+    // 检查同步按钮，如果它被禁用了（意味着可能正在手动同步），则跳过启动时同步
+    if (!syncDriveBtn || syncDriveBtn.disabled) {
+        console.log("启动时同步已跳过：手动同步可能正在进行中。");
+        return;
+    }
+    
+    // 如果本地没有设置过首次同步完成的标志，也跳过，等待用户手动发起首次同步
+    const isFirstSyncCompleted = await db.get('isFirstSyncCompleted');
+    if (isFirstSyncCompleted !== true) {
+        console.log("启动时同步已跳过：等待用户完成首次手动同步。");
+        if (syncStatusSpan) syncStatusSpan.textContent = '请手动同步以关联云端';
+        return;
+    }
+
+    console.log("启动时同步开始：强制从云端更新。");
+    syncDriveBtn.disabled = true;
+    if (syncStatusSpan) syncStatusSpan.textContent = '正在从云端检查更新...';
+
+    try {
+        // --- 认证与文件查找 ---
+        if (!driveSync.tokenClient) await loadGoogleApis();
+        const token = driveSync.gapi.client.getToken();
+        if (token === null) await driveSync.authenticate();
+        await driveSync.findOrCreateFile();
+        if (!driveSync.driveFileId) throw new Error('启动时同步失败：未找到云端文件。');
+
+        // --- 无条件下载云端数据 ---
+        const cloudData = await driveSync.download();
+
+        // --- 检查云端数据是否有效 ---
+        if (cloudData && typeof cloudData === 'object' && Object.keys(cloudData).length > 0) {
+            console.log("启动时同步：发现有效云端数据，将覆盖本地。");
+            // 直接将云端数据赋给全局变量
+            allTasks = cloudData;
+            
+            // 将云端数据保存到本地 IndexedDB
+            // 注意：这里我们不需要更新时间戳，因为我们直接采用了云端的时间戳
+            await db.set('allTasks', allTasks);
+            
+            // 刷新UI以显示最新的数据
+            renderAllLists();
+            if (syncStatusSpan) syncStatusSpan.textContent = '已从云端更新！';
+        } else {
+            console.log("启动时同步：云端无数据或数据为空，不执行任何操作。");
+            if (syncStatusSpan) syncStatusSpan.textContent = ''; // 清空状态
+        }
+
+        // 标记数据为“干净”，因为已经和云端同步了
+        isDataDirty = false;
+        updateSyncIndicator();
+
+    } catch (error) {
+        console.error("启动时自动同步失败:", error);
+        if (syncStatusSpan) {
+            const errorMessage = error.message || '未知错误';
+            syncStatusSpan.textContent = `启动时同步错误: ${errorMessage.substring(0, 30)}...`;
+        }
+    } finally {
+        // 无论成功与否，都要确保按钮最终被释放
+        syncDriveBtn.disabled = false;
+        setTimeout(() => {
+            if (syncStatusSpan && syncStatusSpan.textContent.includes('更新')) {
+                syncStatusSpan.textContent = '';
+            }
+        }, 5000);
+    }
+}
 
 
 async function loadGoogleApis() {
