@@ -3990,34 +3990,67 @@ window.addEventListener('focus', triggerSync);
             console.log("手动同步按钮被点击：将上传本地数据。");
             syncStatusSpan.textContent = '准备上传...';
             syncDriveBtn.disabled = true;
-            let syncSucceeded = false;
-    
-            try {
-                // 在上传前，最后执行一次自动维护，确保上传的是最新状态
-                await runAutomaticUpkeepTasks();
 
-                // --- 认证与文件查找 ---
-                if (!driveSync.tokenClient) await loadGoogleApis();
-                const token = driveSync.gapi.client.getToken();
-                if (token === null) await driveSync.authenticate();
-                await driveSync.findOrCreateFile();
-                if (!driveSync.driveFileId) throw new Error('手动同步失败：未找到云端文件。');
-    
-                // --- 直接上传本地数据 ---
-                // allTasks.lastModifiedTimestamp 已经被 saveTasks() 在修改时正确设置了
-                syncStatusSpan.textContent = '正在上传到云端...';
-                const uploadResult = await driveSync.upload(allTasks);
-                syncStatusSpan.textContent = uploadResult.message;
+        try {
+            // 1. 统一的认证和文件查找
+            if (!driveSync.tokenClient) await loadGoogleApis();
+            const token = driveSync.gapi.client.getToken();
+            if (token === null) await driveSync.authenticate();
+            await driveSync.findOrCreateFile();
+            if (!driveSync.driveFileId) throw new Error('同步失败：未找到或创建云端文件。');
+
+            // 2. 【核心】检查是否为首次同步
+            const isFirstSyncCompleted = await db.get('isFirstSyncCompleted');
+
+            if (isFirstSyncCompleted !== true) {
+                // *** 这是首次同步的逻辑：下载并合并 ***
+                console.log("首次同步：将从云端下载数据以初始化本地。");
+                syncStatusSpan.textContent = '首次关联，正从云端下载...';
                 
-                // 标记首次同步已完成（如果之前未完成的话）
-                const isFirstSyncCompleted = await db.get('isFirstSyncCompleted');
-                if (isFirstSyncCompleted !== true) {
-                    await db.set('isFirstSyncCompleted', true);
+                const cloudData = await driveSync.download();
+
+                // 如果云端有数据，则用云端数据覆盖本地的空壳
+                if (cloudData && typeof cloudData === 'object' && Object.keys(cloudData).length > 0) {
+                    console.log("首次同步：发现云端数据，将覆盖本地。");
+                    allTasks = cloudData; // 使用云端数据
+                    await db.set('allTasks', allTasks); // 保存到本地DB
+                    renderAllLists(); // 刷新UI
+                    syncStatusSpan.textContent = '已成功从云端恢复数据！';
+                } else {
+                    console.log("首次同步：云端无数据，本地数据将成为初始版本。");
+                    // 云端也是空的，说明这真的是一个全新的开始，什么都不用做，直接上传本地的空壳即可。
+                    // 这种情况会在下一步的上传逻辑中处理。
+                    await driveSync.upload(allTasks);
+                    syncStatusSpan.textContent = '已成功初始化云端数据！';
                 }
                 
-                syncSucceeded = true;
-    
-            } catch (error) {
+                // 标记首次同步完成
+                await db.set('isFirstSyncCompleted', true);
+
+            } else {
+                // *** 这是日常同步的逻辑：上传本地更新 ***
+                console.log("日常同步：将上传本地数据。");
+                syncStatusSpan.textContent = '正在上传到云端...';
+                
+                // 在上传前，执行一次自动维护，确保状态最新
+                await runAutomaticUpkeepTasks();
+                
+                const uploadResult = await driveSync.upload(allTasks);
+                syncStatusSpan.textContent = uploadResult.message;
+            }
+
+            // 同步成功后的通用处理
+            isDataDirty = false;
+            updateSyncIndicator();
+            const timeString = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            localStorage.setItem('lastSyncTime', timeString);
+            setTimeout(() => { 
+                if (!isDataDirty && syncStatusSpan.textContent.includes('同步')) {
+                    syncStatusSpan.textContent = '';
+                }
+            }, 7000);
+
+        } catch (error) {
                 console.error("手动同步操作失败:", error);
                 const errorMessage = error.message || '未知错误';
                 syncStatusSpan.textContent = `同步错误: ${errorMessage.substring(0, 40)}...`;
