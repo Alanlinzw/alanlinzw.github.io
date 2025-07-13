@@ -4100,6 +4100,9 @@ async function selectNotionParentPage(isFirstTime = false) {
         }
 
         const PROXY_SEARCH_URL = 'https://notion-auth-proxy.martinlinzhiwu.workers.dev/notion-proxy/v1/search';
+        
+        // 根据Notion API文档，发送一个空的JSON对象作为请求体，
+        // 以获取所有该集成有权访问的页面和数据库。
         const searchBody = {}; 
 
         const response = await fetch(PROXY_SEARCH_URL, {
@@ -4121,7 +4124,7 @@ async function selectNotionParentPage(isFirstTime = false) {
         
         const pages = data.results;
 
-        // 【核心修复】在打开新Prompt前，先关闭旧的“加载”Prompt
+        // 【UI修复】在打开新Prompt前，先关闭旧的“加载”Prompt
         closeCustomPrompt();
 
         if (pages.length === 0) {
@@ -4160,23 +4163,22 @@ async function selectNotionParentPage(isFirstTime = false) {
                         promptContent.style.color = 'var(--danger-color)';
                         promptContent.textContent = '请务必选择一个页面或数据库！';
                     }
-                    return false;
+                    return false; // 阻止prompt关闭
                 }
                 
                 await db.set('notion_parent_page_id', selectedPageId);
                 const parentType = pages.find(p => p.id === selectedPageId)?.object;
                 await db.set('notion_parent_type', parentType);
 
+                // 【UI修复】不再弹出“设置成功”的提示，直接关闭当前的选择框
                 closeCustomPrompt();
 
-                setTimeout(() => {
-                    openCustomPrompt({ title: "设置成功！", message: "您的Notion已设置完成，现在可以导出了。", confirmText: "太棒了！" });
-                    if (isFirstTime) {
-                       setTimeout(executeNotionExport, 500);
-                    }
-                }, 200);
+                // 如果是首次设置，立即触发导出流程
+                if (isFirstTime) {
+                   executeNotionExport();
+                }
 
-                return true;
+                return true; // 确认关闭
             }
         });
 
@@ -4239,29 +4241,36 @@ function htmlToNotionBlocks(htmlString) {
     return blocks;
 }
 
-/**
- * Main function to execute the export to Notion.
- */
 async function executeNotionExport() {
+    // 【核心修改】在函数开始时，就打开一个“正在导出”的提示，而不是修改按钮文字。
+    // 这会覆盖掉所有之前的弹窗，成为当前唯一的信息提示。
+    openCustomPrompt({
+        title: "正在导出到Notion...",
+        message: "请稍候，正在将报告发送到您的Notion工作区。",
+        inputType: 'none',
+        hideConfirmButton: true,
+        hideCancelButton: true
+    });
+
+    // 将按钮状态的修改移到 try...finally 之外，因为我们用弹窗代替了按钮状态
     const exportBtn = document.getElementById('export-to-notion-btn');
-    if (exportBtn) {
-        exportBtn.disabled = true;
-        exportBtn.textContent = "导出中...";
-    }
+    if (exportBtn) exportBtn.disabled = true;
 
     try {
         const accessToken = await db.get('notion_access_token');
         const parentId = await db.get('notion_parent_page_id');
-        const parentType = await db.get('notion_parent_type');
-
+        
+        // 【重要】如果accessToken或parentId不存在，先关闭“导出中”弹窗，再打开选择页面的弹窗
         if (!accessToken || !parentId) {
+            closeCustomPrompt(); 
             await selectNotionParentPage();
             return; 
         }
 
+        const parentType = await db.get('notion_parent_type');
         const pendingExportRaw = localStorage.getItem('pendingNotionExport');
+        
         if (!pendingExportRaw) {
-            // 如果localStorage没有，就从当前UI获取，作为备用方案
             const currentTitle = aiReportTitle.textContent;
             const currentContent = aiReportContent.innerHTML;
             if(!currentTitle || !currentContent) {
@@ -4318,22 +4327,32 @@ async function executeNotionExport() {
             throw new Error(`Notion API Error: ${responseData.message || responseData.error}`);
         }
         
+     // 【核心修改】在显示成功提示前，先关闭“正在导出”的提示
+        closeCustomPrompt();
+
         const newPage = responseData;
         localStorage.removeItem('pendingNotionExport');
 
-        openCustomPrompt({
-            title: "导出成功！",
-            htmlContent: `<p>报告已成功导出到Notion。</p><a href="${newPage.url}" target="_blank" class="custom-prompt-btn custom-prompt-confirm" style="display:inline-block; margin-top:10px; text-decoration:none;">在Notion中查看</a>`,
-            hideConfirmButton: true,
-            cancelText: '完成'
-        });
+        // 延迟一点再显示最终成功提示，避免UI闪烁
+        setTimeout(() => {
+            openCustomPrompt({
+                title: "导出成功！",
+                htmlContent: `<p>报告已成功导出到Notion。</p><a href="${newPage.url}" target="_blank" class="custom-prompt-btn custom-prompt-confirm" style="display:inline-block; margin-top:10px; text-decoration:none;">在Notion中查看</a>`,
+                hideConfirmButton: true,
+                cancelText: '完成'
+            });
+        }, 200);
 
     } catch (error) {
-        openCustomPrompt({ title: "导出失败", message: error.message, confirmText: "好的" });
+        // 【核心修改】在显示错误提示前，也先关闭“正在导出”的提示
+        closeCustomPrompt();
+        // 延迟显示错误，避免UI闪烁
+        setTimeout(() => {
+            openCustomPrompt({ title: "导出失败", message: error.message, confirmText: "好的" });
+        }, 200);
     } finally {
         if (exportBtn) {
             exportBtn.disabled = false;
-            exportBtn.textContent = "导出到Notion ✨";
         }
     }
 }
