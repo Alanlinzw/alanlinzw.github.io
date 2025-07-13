@@ -3891,7 +3891,7 @@ window.addEventListener('focus', triggerSync);
         syncDriveBtn.disabled = true;
         let syncSucceeded = false;
 
-        try {
+
             try {
             // ==========================================================
             //  步骤 1: 准备本地数据
