@@ -5747,7 +5747,7 @@ async function handleNotionCallback() {
 
     if (authCode) {
         // 使用一个固定的、权威的PWA URL来清理地址栏
-        const PWA_URL = 'https://alanlinzw.github.io/efficienTodo_pwa/'; // 你的PWA的固定URL
+        const PWA_URL = 'https://alanlinzw.github.io/'; // 你的PWA的固定URL
         window.history.replaceState({}, document.title, PWA_URL);
 
         // 显示加载提示
