@@ -3379,14 +3379,32 @@ function urlBase64ToUint8Array(base64String) {
     for (let i = 0; i < rawData.length; ++i) { outputArray[i] = rawData.charCodeAt(i); }
     return outputArray;
 }
+// 在 app.js 中，用这个新版本完整替换掉 openCustomPrompt
+
 function openCustomPrompt(config) {
+    // 检查是否已经有一个弹窗打开了
+    const isModalOpen = customPromptModal && !customPromptModal.classList.contains('hidden');
+
+    // 如果已经有一个弹窗，并且我们不是要更新它，这是一个调用错误，先关闭旧的
+    // 这是为了防止意外的重叠调用，增加代码的健壮性
+    if (isModalOpen && !config.isUpdate) {
+        console.warn("openCustomPrompt called while another prompt is already open. Closing the old one first and retrying.");
+        closeCustomPrompt(() => {
+            // 在旧弹窗完全关闭后，再重新调用 openCustomPrompt
+            openCustomPrompt(config);
+        });
+        return;
+    }
+
     currentPromptConfig = config;
-    if(customPromptModal && customPromptTitleEl && customPromptMessageEl && customPromptInputContainer && customPromptConfirmBtn && customPromptCancelBtn) {
+    if (customPromptModal && customPromptTitleEl && customPromptMessageEl && customPromptInputContainer && customPromptConfirmBtn && customPromptCancelBtn) {
+        // --- 设置标题和消息 ---
         customPromptTitleEl.textContent = config.title || '提示';
         customPromptMessageEl.textContent = config.message || '';
         customPromptMessageEl.style.display = config.message ? 'block' : 'none';
         
-        customPromptInputContainer.innerHTML = ''; 
+        // --- 处理输入区域 ---
+        customPromptInputContainer.innerHTML = ''; // 每次都清空
         if (config.inputType && config.inputType !== 'none') {
             let inputEl;
             if (config.inputType === 'textarea') {
@@ -3409,22 +3427,30 @@ function openCustomPrompt(config) {
             customPromptInputContainer.style.display = 'block';
             setTimeout(() => inputEl.focus(), 50);
         } else {
+            // 确保没有输入框时，容器是隐藏的
             customPromptInputContainer.style.display = 'none';
         }
 
+        // --- 处理自定义HTML内容 ---
         if (config.htmlContent) {
             customPromptInputContainer.innerHTML = config.htmlContent;
             customPromptInputContainer.style.display = 'block';
         }
 
+        // --- 设置按钮 ---
         customPromptConfirmBtn.textContent = config.confirmText || '确认';
         customPromptCancelBtn.textContent = config.cancelText || '取消';
         
         customPromptConfirmBtn.style.display = config.hideConfirmButton ? 'none' : 'inline-block';
         customPromptCancelBtn.style.display = config.hideCancelButton ? 'none' : 'inline-block';
         
-        customPromptModal.classList.remove('hidden');
+        // --- 显示模态框 ---
+        // 只有当模态框是隐藏的时候，才移除 .hidden 类来触发打开动画
+        if (customPromptModal.classList.contains('hidden')) {
+            customPromptModal.classList.remove('hidden');
+        }
         
+        // --- 执行渲染回调 ---
         if (typeof config.onRender === 'function') {
             config.onRender();
         }
@@ -3432,8 +3458,44 @@ function openCustomPrompt(config) {
         console.error("Custom prompt modal elements not found.");
     }
 }
-function closeCustomPrompt() {
-    if(customPromptModal) customPromptModal.classList.add('hidden');
+function closeCustomPrompt(onClosedCallback) {
+    if (customPromptModal) {
+        // 如果模态框已经是隐藏的，直接执行回调（如果有）并返回，避免不必要的操作
+        if (customPromptModal.classList.contains('hidden')) {
+            if (typeof onClosedCallback === 'function') {
+                onClosedCallback();
+            }
+            return;
+        }
+
+        // 添加 .hidden 类来启动CSS关闭动画
+        customPromptModal.classList.add('hidden');
+
+        // 设置一个定时器，其延迟时间应与CSS中的transition-duration相匹配或略长
+        // 假设CSS动画是0.3秒，我们设置为350毫秒来确保动画完成
+        const transitionDuration = 350;
+
+        setTimeout(() => {
+            // 在动画结束后，安全地执行回调函数
+            if (typeof onClosedCallback === 'function') {
+                try {
+                    onClosedCallback();
+                } catch (e) {
+                    console.error("Error in onClosedCallback for closeCustomPrompt:", e);
+                }
+            }
+        }, transitionDuration);
+
+    } else if (typeof onClosedCallback === 'function') {
+        // 如果模态框元素本身不存在，也应该尝试执行回调，以防逻辑中断
+        try {
+            onClosedCallback();
+        } catch (e) {
+            console.error("Error in onClosedCallback (modal not found):", e);
+        }
+    }
+    
+    // 清理全局配置和事件监听器
     currentPromptConfig = {}; 
     if (activeKeydownHandler) {
         document.removeEventListener('keydown', activeKeydownHandler);
@@ -4245,10 +4307,9 @@ async function executeNotionExport() {
     const exportBtn = document.getElementById('export-to-notion-btn');
     if (exportBtn) {
         exportBtn.disabled = true;
-        exportBtn.textContent = "导出中..."; // 早期反馈
+        exportBtn.textContent = "导出中...";
     }
 
-    // 在所有操作前，先打开“正在导出”的提示
     openCustomPrompt({
         title: "正在导出到Notion...",
         message: "请稍候，正在将报告发送到您的Notion工作区。",
@@ -4262,9 +4323,10 @@ async function executeNotionExport() {
         const parentId = await db.get('notion_parent_page_id');
 
         if (!accessToken || !parentId) {
-            closeCustomPrompt();
-            await selectNotionParentPage();
-            // 注意：selectNotionParentPage完成后会自己触发导出，所以这里可以直接返回
+            // 【使用回调】先关闭“导出中”，关闭动画结束后再打开“选择页面”
+            closeCustomPrompt(() => {
+                selectNotionParentPage();
+            });
             return;
         }
 
@@ -4291,10 +4353,7 @@ async function executeNotionExport() {
                 parent: { database_id: parentId },
                 properties: { 'Name': { title: [{ text: { content: reportTitle } }] } }
             };
-            // 只有当有内容块时才添加children属性
-            if (notionBlocks.length > 0) {
-                requestBody.children = notionBlocks;
-            }
+            if (notionBlocks.length > 0) requestBody.children = notionBlocks;
         } else {
             requestBody = {
                 parent: { page_id: parentId },
@@ -4328,23 +4387,22 @@ async function executeNotionExport() {
         const newPage = responseData;
         localStorage.removeItem('pendingNotionExport');
 
-        // 【核心修复】先关闭，然后延迟足够长的时间再打开新的
-        closeCustomPrompt();
-        setTimeout(() => {
+        // 【核心修复】在这里使用新的回调机制！
+        // 先关闭“正在导出...”弹窗，并告诉它在关闭动画结束后，再打开“导出成功”的弹窗。
+        closeCustomPrompt(() => {
             openCustomPrompt({
                 title: "导出成功！",
                 htmlContent: `<p>报告已成功导出到Notion。</p><a href="${newPage.url}" target="_blank" class="custom-prompt-btn custom-prompt-confirm" style="display:inline-block; margin-top:10px; text-decoration:none;">在Notion中查看</a>`,
                 hideConfirmButton: true,
                 cancelText: '完成'
             });
-        }, 400); // 增加延迟到400毫秒，确保CSS动画(0.3s)完成
+        });
 
     } catch (error) {
-        // 在catch块里也使用同样的模式
-        closeCustomPrompt();
-        setTimeout(() => {
+        // 在catch块里也使用同样的回调模式
+        closeCustomPrompt(() => {
             openCustomPrompt({ title: "导出失败", message: error.message, confirmText: "好的" });
-        }, 400); // 同样增加延迟
+        });
     } finally {
         if (exportBtn) {
             exportBtn.disabled = false;
