@@ -5716,58 +5716,47 @@ async function handleNotionCallback() {
     const authCode = urlParams.get('code');
 
     if (authCode) {
-        // 1. 从URL中移除code，清理地址栏
-        const newUrl = window.location.origin + window.location.pathname;
-        window.history.replaceState({}, document.title, newUrl);
+        const PWA_URL = 'https://alanlinzw.github.io/'; // 【重要】你的PWA的固定URL
+        window.history.replaceState({}, document.title, PWA_URL);
 
-        // 2. 显示加载提示
         openCustomPrompt({
             title: "正在完成Notion授权...",
-            message: "请稍候，正在安全地验证您的授权信息。",
+            message: "请稍候，正在通过安全代理验证您的授权信息。",
             inputType: 'none',
             hideConfirmButton: true,
             hideCancelButton: true
         });
 
         try {
-            // 3. 获取存储的code_verifier
+            // PKCE的 verifier 仍然需要
             const codeVerifier = await db.get('notion_code_verifier');
-            if (!codeVerifier) {
-                throw new Error("授权状态已过期，请重试。");
+            await db.set('notion_code_verifier', null);
+
+            // 【核心修改】请求你自己的Worker代理，而不是Notion
+            const PROXY_URL = 'https://notion-auth-proxy.martinlinzhiwu.workers.dev/'; // 替换为你的Worker URL
+            const proxyUrl = new URL(PROXY_URL);
+            proxyUrl.searchParams.append('code', authCode);
+            // 如果你的Worker需要verifier，也一起传过去
+            if (codeVerifier) {
+                proxyUrl.searchParams.append('verifier', codeVerifier);
             }
-            await db.set('notion_code_verifier', null); // 用后即焚
-
-            // 4. 使用code和verifier交换access_token
-            const NOTION_CLIENT_ID = '22fd872b-594c-802d-bd93-0037133f9480'; // 再次需要
-
-            const response = await fetch("https://api.notion.com/v1/oauth/token", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Basic ${btoa(NOTION_CLIENT_ID + ":")}` // PKCE流程Client Secret为空
-                },
-                body: JSON.stringify({
-                    grant_type: "authorization_code",
-                    code: authCode,
-                    redirect_uri: newUrl,
-                    code_verifier: codeVerifier,
-                }),
+            
+            const response = await fetch(proxyUrl.toString(), {
+                method: "POST" // 或者 "GET"，取决于你的Worker如何设计接收参数
             });
-
-            if (!response.ok) {
-                const errorData = await response.json();
-                throw new Error(`Notion API错误: ${errorData.error_description || errorData.error}`);
-            }
 
             const tokenData = await response.json();
 
-            // 5. 存储获取到的token
+            if (!response.ok || tokenData.error) {
+                throw new Error(tokenData.error || "从代理服务器获取Token失败。");
+            }
+            
+            // 后续逻辑保持不变
             await db.set('notion_access_token', tokenData.access_token);
             await db.set('notion_workspace_id', tokenData.workspace_id);
             
-            // 6. 关闭加载提示，进入下一步：选择页面
             closeCustomPrompt();
-            await selectNotionParentPage(true); // 传入true表示这是首次设置
+            await selectNotionParentPage(true);
 
         } catch (error) {
             closeCustomPrompt();
@@ -5775,6 +5764,8 @@ async function handleNotionCallback() {
         }
     }
 }
+
+
 // 【新增】监听来自 Service Worker 的消息
 if ('serviceWorker' in navigator) {
     let newWorker;
