@@ -4091,41 +4091,48 @@ async function selectNotionParentPage(isFirstTime = false) {
 
     try {
         const accessToken = await db.get('notion_access_token');
+        
+        // 【核心修复 1】在发送请求前，严格检查accessToken是否存在。
         if (!accessToken) {
-            throw new Error("无法找到Notion访问凭证，请重新授权。");
+            throw new Error("无法找到Notion访问凭证。请返回并重新点击“导出到Notion”以发起授权。");
         }
 
-        // 定义代理的/search路径
         const PROXY_SEARCH_URL = 'https://notion-auth-proxy.martinlinzhiwu.workers.dev/notion-proxy/v1/search';
 
-        // 通过代理调用Notion的搜索API
+        // 准备一个即使为空也有效的请求体
+        const searchBody = {
+            filter: {
+                or: [
+                    { property: 'object', value: 'page' },
+                    { property: 'object', value: 'database' }
+                ]
+            },
+            sort: { direction: 'ascending', timestamp: 'last_edited_time' }
+        };
+
         const response = await fetch(PROXY_SEARCH_URL, {
             method: 'POST',
             headers: {
-                // 将必要的头信息发送给我们的代理
                 'Authorization': `Bearer ${accessToken}`,
                 'Notion-Version': '2022-06-28',
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({
-                filter: {
-                    or: [
-                        { property: 'object', value: 'page' },
-                        { property: 'object', value: 'database' }
-                    ]
-                },
-                sort: { direction: 'ascending', timestamp: 'last_edited_time' }
-            })
+            // 【核心修复 2】确保body始终是一个有效的JSON字符串。
+            body: JSON.stringify(searchBody)
         });
 
         const data = await response.json();
 
+        // 【核心修复 3】更精细地处理错误响应
         if (!response.ok) {
-            throw new Error(data.error || "无法通过代理获取Notion页面列表。");
+            // 如果错误信息在data.error里，就用它，否则用通用的HTTP状态文本
+            const errorMessage = data.error || `请求失败，状态码: ${response.status} ${response.statusText}`;
+            throw new Error(errorMessage);
         }
         
         const pages = data.results;
 
+        // ... 后续的页面选择逻辑保持不变 ...
         if (pages.length === 0) {
             closeCustomPrompt();
             openCustomPrompt({
@@ -4136,7 +4143,6 @@ async function selectNotionParentPage(isFirstTime = false) {
             return;
         }
 
-        // 构建页面选择器的HTML
         let optionsHtml = `
             <p>请选择一个页面或数据库，未来所有的AI报告都将导出到这里。</p>
             <select id="notion-page-selector" class="header-select" style="width: 100%; margin-top: 10px;">
@@ -4148,7 +4154,6 @@ async function selectNotionParentPage(isFirstTime = false) {
                 }).join('')}
             </select>`;
 
-        // 更新prompt内容以显示选择器
         closeCustomPrompt();
         openCustomPrompt({
             title: "选择报告存放位置",
@@ -4158,31 +4163,28 @@ async function selectNotionParentPage(isFirstTime = false) {
                 const selector = document.getElementById('notion-page-selector');
                 const selectedPageId = selector.value;
                 if (!selectedPageId) {
-                    // 使用 alert 或更友好的提示方式
                     const promptContent = document.querySelector('#custom-prompt-modal .custom-prompt-content p');
                     if (promptContent) {
                         promptContent.style.color = 'var(--danger-color)';
                         promptContent.textContent = '请务必选择一个页面或数据库！';
                     }
-                    return false; // 阻止prompt关闭
+                    return false;
                 }
                 
                 await db.set('notion_parent_page_id', selectedPageId);
                 const parentType = pages.find(p => p.id === selectedPageId)?.object;
                 await db.set('notion_parent_type', parentType);
 
-                closeCustomPrompt(); // 先关闭选择框
+                closeCustomPrompt();
 
-                // 延迟一点再显示成功提示，体验更好
                 setTimeout(() => {
                     openCustomPrompt({ title: "设置成功！", message: "您的Notion已设置完成，现在可以导出了。", confirmText: "太棒了！" });
-                    // 如果是首次设置后，自动触发一次导出
                     if (isFirstTime) {
                        setTimeout(executeNotionExport, 500);
                     }
                 }, 200);
 
-                return true; // 确认关闭
+                return true;
             }
         });
 
@@ -4191,6 +4193,7 @@ async function selectNotionParentPage(isFirstTime = false) {
         openCustomPrompt({ title: "加载页面失败", message: error.message, confirmText: '好的' });
     }
 }
+
 /**
  * Parses an HTML string into an array of Notion block objects.
  */
