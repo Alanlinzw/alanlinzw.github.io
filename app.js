@@ -4083,6 +4083,7 @@ async function redirectToNotionAuthPKCE() {
 // 在 app.js 中，用这个新版本完整替换掉 selectNotionParentPage
 
 async function selectNotionParentPage(isFirstTime = false) {
+    // 1. 打开“正在加载”的提示
     openCustomPrompt({
         title: "选择报告存放位置",
         message: "正在加载您已授权的Notion页面...",
@@ -4099,9 +4100,6 @@ async function selectNotionParentPage(isFirstTime = false) {
         }
 
         const PROXY_SEARCH_URL = 'https://notion-auth-proxy.martinlinzhiwu.workers.dev/notion-proxy/v1/search';
-
-        // 【核心修复】根据Notion API文档，发送一个空的JSON对象作为请求体，
-        // 以获取所有该集成有权访问的页面和数据库。
         const searchBody = {}; 
 
         const response = await fetch(PROXY_SEARCH_URL, {
@@ -4123,9 +4121,11 @@ async function selectNotionParentPage(isFirstTime = false) {
         
         const pages = data.results;
 
-        // 后续的页面选择逻辑完全不需要改变
+        // 【核心修复】在打开新Prompt前，先关闭旧的“加载”Prompt
+        closeCustomPrompt();
+
         if (pages.length === 0) {
-            closeCustomPrompt();
+            // 如果没有页面，直接显示错误提示
             openCustomPrompt({
                 title: "未找到可用的页面",
                 message: "您似乎没有授权任何页面给本应用。请前往Notion，将您希望使用的页面或数据库分享给“EfficienTodo Report Exporter”这个集成，然后重试。",
@@ -4134,6 +4134,7 @@ async function selectNotionParentPage(isFirstTime = false) {
             return;
         }
 
+        // 构建页面选择器的HTML
         let optionsHtml = `
             <p>请选择一个页面或数据库，未来所有的AI报告都将导出到这里。</p>
             <select id="notion-page-selector" class="header-select" style="width: 100%; margin-top: 10px;">
@@ -4145,7 +4146,7 @@ async function selectNotionParentPage(isFirstTime = false) {
                 }).join('')}
             </select>`;
 
-        closeCustomPrompt();
+        // 2. 现在，打开包含选择器的新Prompt
         openCustomPrompt({
             title: "选择报告存放位置",
             htmlContent: optionsHtml,
@@ -4180,6 +4181,7 @@ async function selectNotionParentPage(isFirstTime = false) {
         });
 
     } catch (error) {
+        // 在catch块里，也要确保关闭“加载”弹窗，再显示错误弹窗
         closeCustomPrompt();
         openCustomPrompt({ title: "加载页面失败", message: error.message, confirmText: '好的' });
     }
