@@ -373,6 +373,36 @@ function getReportData(reportType) {
 
 }
 
+/**
+ * Generates a cryptographically secure random string for the code verifier.
+ * @param {number} length The length of the string to generate.
+ * @returns {string} A random string.
+ */
+function generateCodeVerifier(length) {
+    let text = '';
+    const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+    for (let i = 0; i < length; i++) {
+        text += possible.charAt(Math.floor(Math.random() * possible.length));
+    }
+    return text;
+}
+
+/**
+ * Hashes the code verifier using SHA-256 and encodes it in Base64URL format.
+ * @param {string} verifier The code verifier string.
+ * @returns {Promise<string>} The Base64URL-encoded code challenge.
+ */
+async function generateCodeChallenge(verifier) {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(verifier);
+    const digest = await window.crypto.subtle.digest('SHA-256', data);
+    
+    return window.btoa(String.fromCharCode(...new Uint8Array(digest)))
+        .replace(/\+/g, '-')
+        .replace(/\//g, '_')
+        .replace(/=/g, '');
+}
+
 // Google Drive Sync Module
 const driveSync = {
     CLIENT_ID: '325408458040-bp083eplhebaj5eoe2m9go2rdiir9l6c.apps.googleusercontent.com',
@@ -4007,6 +4037,282 @@ function addAIParsedTask(parsedData) {
     renderAllLists();
 }
 
+async function handleExportToNotionClick() {
+    const accessToken = await db.get('notion_access_token');
+    
+    if (accessToken) {
+        // 如果已有token，直接进入导出流程
+        await executeNotionExport();
+    } else {
+        // 如果没有token，启动首次授权流程
+        await redirectToNotionAuthPKCE();
+    }
+}
+
+async function redirectToNotionAuthPKCE() {
+    // 1. 从Notion开发者中心获取您的Client ID
+    const NOTION_CLIENT_ID = '22fd872b-594c-802d-bd93-0037133f9480'; // 替换为你的Client ID
+    const REDIRECT_URI = window.location.origin + window.location.pathname; // PWA的当前URL
+
+    // 2. 生成并存储 code_verifier
+    const codeVerifier = generateCodeVerifier(128);
+    await db.set('notion_code_verifier', codeVerifier);
+
+    // 3. 生成 code_challenge
+    const codeChallenge = await generateCodeChallenge(codeVerifier);
+
+    // 4. 构建授权URL
+    const authUrl = new URL('https://api.notion.com/v1/oauth/authorize');
+    authUrl.searchParams.append('client_id', NOTION_CLIENT_ID);
+    authUrl.searchParams.append('response_type', 'code');
+    authUrl.searchParams.append('owner', 'user');
+    authUrl.searchParams.append('redirect_uri', REDIRECT_URI);
+    // PKCE-specific parameters
+    authUrl.searchParams.append('code_challenge_method', 'S256');
+    authUrl.searchParams.append('code_challenge', codeChallenge);
+
+    // 5. 在跳转前，保存当前报告内容
+    const reportContent = aiReportContent.innerHTML;
+    const reportTitle = aiReportTitle.textContent;
+    localStorage.setItem('pendingNotionExport', JSON.stringify({ title: reportTitle, content: reportContent }));
+
+    // 6. 跳转到Notion授权页面
+    window.location.href = authUrl.toString();
+}
+
+async function selectNotionParentPage(isFirstTime = false) {
+    openCustomPrompt({
+        title: "选择报告存放位置",
+        message: "正在加载您已授权的Notion页面...",
+        inputType: 'none',
+        hideConfirmButton: true,
+        hideCancelButton: true
+    });
+
+    try {
+        const accessToken = await db.get('notion_access_token');
+        
+        // 调用Notion搜索API
+        const response = await fetch('https://api.notion.com/v1/search', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Notion-Version': '2022-06-28',
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                filter: {
+                    // 只搜索用户可以作为父页面的页面或数据库
+                    or: [
+                        { property: 'object', value: 'page' },
+                        { property: 'object', value: 'database' }
+                    ]
+                },
+                sort: { direction: 'ascending', timestamp: 'last_edited_time' }
+            })
+        });
+
+        if (!response.ok) throw new Error("无法获取Notion页面列表。");
+        
+        const data = await response.json();
+        const pages = data.results;
+
+        if (pages.length === 0) {
+            closeCustomPrompt();
+            openCustomPrompt({
+                title: "未找到可用的页面",
+                message: "您似乎没有授权任何页面给本应用。请前往Notion，将您希望使用的页面或数据库分享给“EfficienTodo Report Exporter”这个集成，然后重试。",
+                confirmText: "好的"
+            });
+            return;
+        }
+
+        // 构建页面选择器的HTML
+        let optionsHtml = `
+            <p>请选择一个页面或数据库，未来所有的AI报告都将导出到这里。</p>
+            <select id="notion-page-selector" class="header-select" style="width: 100%; margin-top: 10px;">
+                <option value="">-- 请选择 --</option>
+                ${pages.map(page => {
+                    const title = page.properties.title?.title[0]?.plain_text || page.title?.[0]?.plain_text || '无标题页面';
+                    const icon = page.icon?.emoji || '📄';
+                    return `<option value="${page.id}">${icon} ${title}</option>`;
+                }).join('')}
+            </select>`;
+
+        // 更新prompt内容
+        closeCustomPrompt();
+        openCustomPrompt({
+            title: "选择报告存放位置",
+            htmlContent: optionsHtml,
+            confirmText: "确认并保存",
+            onConfirm: async () => {
+                const selector = document.getElementById('notion-page-selector');
+                const selectedPageId = selector.value;
+                if (!selectedPageId) {
+                    alert("请选择一个页面！");
+                    return false; // 阻止prompt关闭
+                }
+                
+                await db.set('notion_parent_page_id', selectedPageId);
+                const parentType = pages.find(p => p.id === selectedPageId)?.object;
+                await db.set('notion_parent_type', parentType); // 存储父级类型 ('page' or 'database')
+
+                openCustomPrompt({ title: "设置成功！", message: "您的Notion已设置完成，现在可以导出了。", confirmText: "太棒了！" });
+
+                // 如果是首次设置后，自动触发一次导出
+                if (isFirstTime) {
+                   setTimeout(executeNotionExport, 500);
+                }
+            }
+        });
+
+    } catch (error) {
+        closeCustomPrompt();
+        openCustomPrompt({ title: "加载页面失败", message: error.message, confirmText: '好的' });
+    }
+}
+
+/**
+ * Parses an HTML string into an array of Notion block objects.
+ */
+function htmlToNotionBlocks(htmlString) {
+    const blocks = [];
+    const tempDiv = document.createElement('div');
+    tempDiv.innerHTML = htmlString;
+
+    tempDiv.childNodes.forEach(node => {
+        const textContent = node.textContent.trim();
+        if (!textContent) return;
+
+        if (node.nodeName.match(/^H[2-4]$/)) {
+            blocks.push({
+                object: 'block',
+                type: 'heading_2',
+                heading_2: { rich_text: [{ type: 'text', text: { content: textContent } }] }
+            });
+        } else if (node.nodeName === 'UL') {
+            node.querySelectorAll('li').forEach(li => {
+                if (li.textContent.trim()) {
+                    blocks.push({
+                        object: 'block',
+                        type: 'bulleted_list_item',
+                        bulleted_list_item: { rich_text: [{ type: 'text', text: { content: li.textContent.trim() } }] }
+                    });
+                }
+            });
+        } else if (node.nodeName === 'P') {
+            blocks.push({
+                object: 'block',
+                type: 'paragraph',
+                paragraph: { rich_text: [{ type: 'text', text: { content: textContent } }] }
+            });
+        }
+    });
+
+    // 添加一个分割线和导出时间戳，增加上下文
+    blocks.push({ object: 'block', type: 'divider', divider: {} });
+    blocks.push({
+        object: 'block',
+        type: 'paragraph',
+        paragraph: {
+            rich_text: [{
+                type: 'text',
+                text: { content: `Generated by EfficienTodo on ${new Date().toLocaleString()}` },
+                annotations: { italic: true, color: 'gray' }
+            }]
+        }
+    });
+    return blocks;
+}
+
+/**
+ * Main function to execute the export to Notion.
+ */
+async function executeNotionExport() {
+    const exportBtn = document.getElementById('export-to-notion-btn');
+    exportBtn.disabled = true;
+    exportBtn.textContent = "导出中...";
+
+    try {
+        const accessToken = await db.get('notion_access_token');
+        const parentId = await db.get('notion_parent_page_id');
+        const parentType = await db.get('notion_parent_type');
+
+        if (!accessToken || !parentId) {
+            // 如果信息不全，则重新引导用户设置
+            await selectNotionParentPage();
+            return; 
+        }
+
+        // 恢复之前保存的报告内容
+        const pendingExportRaw = localStorage.getItem('pendingNotionExport');
+        if (!pendingExportRaw) throw new Error("找不到待导出的报告内容。");
+        const pendingExport = JSON.parse(pendingExportRaw);
+        
+        const reportTitle = pendingExport.title;
+        const reportHtml = pendingExport.content;
+        const notionBlocks = htmlToNotionBlocks(reportHtml);
+
+        let requestBody;
+        if (parentType === 'database') {
+            // 如果父级是数据库，创建数据库条目
+            requestBody = {
+                parent: { database_id: parentId },
+                properties: {
+                    // 假设数据库的主标题属性名为'Name'或'报告名称'
+                    // 需要根据你的模板调整
+                    'Name': { title: [{ text: { content: reportTitle } }] }
+                },
+                children: notionBlocks
+            };
+        } else {
+            // 如果父级是页面，创建子页面
+            requestBody = {
+                parent: { page_id: parentId },
+                properties: {
+                    title: { title: [{ text: { content: reportTitle } }] }
+                },
+                children: notionBlocks
+            };
+        }
+
+        const response = await fetch('https://api.notion.com/v1/pages', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'Notion-Version': '2022-06-28',
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(requestBody)
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            if (errorData.code === 'invalid_grant' || errorData.code === 'unauthorized') {
+                 await db.set('notion_access_token', null); // 清除过期的token
+                 throw new Error("Notion授权已过期或失效，请重新授权。");
+            }
+            throw new Error(`Notion API Error: ${errorData.message}`);
+        }
+        
+        const newPage = await response.json();
+        localStorage.removeItem('pendingNotionExport'); // 成功后清除
+
+        openCustomPrompt({
+            title: "导出成功！",
+            htmlContent: `<p>报告已成功导出到Notion。</p><a href="${newPage.url}" target="_blank" class="custom-prompt-btn custom-prompt-confirm" style="display:inline-block; margin-top:10px;">在Notion中查看</a>`,
+            hideConfirmButton: true,
+            cancelText: '完成'
+        });
+
+    } catch (error) {
+        openCustomPrompt({ title: "导出失败", message: error.message, confirmText: "好的" });
+    } finally {
+        exportBtn.disabled = false;
+        exportBtn.textContent = "导出到Notion ✨";
+    }
+}
+
 let GAPI_INSTANCE = null;
 let GIS_OAUTH2_INSTANCE = null;
 
@@ -4153,6 +4459,10 @@ window.addEventListener('focus', triggerSync);
     });
 }
 
+const exportToNotionBtn = document.getElementById('export-to-notion-btn');
+if (exportToNotionBtn) {
+    exportToNotionBtn.addEventListener('click', handleExportToNotionClick);
+}
 
 // 【新增】绑定备份与恢复的事件
     if (backupRestoreBtn) {
@@ -5327,7 +5637,7 @@ if (!statsModal) {
     loadTheme();
     await loadNotificationSetting();
     console.log("initializeApp: 主题和通知设置已加载。");
-
+    await handleNotionCallback(); 
     // 4. 加载 Google API
   try {
         await loadGoogleApis();
@@ -5400,6 +5710,71 @@ if (!statsModal) {
     } else {
         console.log('Periodic Background Sync not supported in this browser. Fallback to activate/startup checks.');
     }
+
+async function handleNotionCallback() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const authCode = urlParams.get('code');
+
+    if (authCode) {
+        // 1. 从URL中移除code，清理地址栏
+        const newUrl = window.location.origin + window.location.pathname;
+        window.history.replaceState({}, document.title, newUrl);
+
+        // 2. 显示加载提示
+        openCustomPrompt({
+            title: "正在完成Notion授权...",
+            message: "请稍候，正在安全地验证您的授权信息。",
+            inputType: 'none',
+            hideConfirmButton: true,
+            hideCancelButton: true
+        });
+
+        try {
+            // 3. 获取存储的code_verifier
+            const codeVerifier = await db.get('notion_code_verifier');
+            if (!codeVerifier) {
+                throw new Error("授权状态已过期，请重试。");
+            }
+            await db.set('notion_code_verifier', null); // 用后即焚
+
+            // 4. 使用code和verifier交换access_token
+            const NOTION_CLIENT_ID = '22fd872b-594c-802d-bd93-0037133f9480'; // 再次需要
+
+            const response = await fetch("https://api.notion.com/v1/oauth/token", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Authorization": `Basic ${btoa(NOTION_CLIENT_ID + ":")}` // PKCE流程Client Secret为空
+                },
+                body: JSON.stringify({
+                    grant_type: "authorization_code",
+                    code: authCode,
+                    redirect_uri: newUrl,
+                    code_verifier: codeVerifier,
+                }),
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(`Notion API错误: ${errorData.error_description || errorData.error}`);
+            }
+
+            const tokenData = await response.json();
+
+            // 5. 存储获取到的token
+            await db.set('notion_access_token', tokenData.access_token);
+            await db.set('notion_workspace_id', tokenData.workspace_id);
+            
+            // 6. 关闭加载提示，进入下一步：选择页面
+            closeCustomPrompt();
+            await selectNotionParentPage(true); // 传入true表示这是首次设置
+
+        } catch (error) {
+            closeCustomPrompt();
+            openCustomPrompt({ title: "Notion授权失败", message: error.message, inputType: 'none', confirmText: '好的' });
+        }
+    }
+}
 // 【新增】监听来自 Service Worker 的消息
 if ('serviceWorker' in navigator) {
     let newWorker;
@@ -5436,6 +5811,8 @@ if ('serviceWorker' in navigator) {
     });
 }
     await requestBackupCheck();
+
+
 
 }
 document.addEventListener('DOMContentLoaded', initializeApp);
