@@ -1763,3 +1763,61 @@ body { padding-bottom: 80px; }
 .api-key-helper-text a:hover {
     text-decoration: underline;
 }
+
+/* ==========================================================================
+   35. CUSTOM PROMPT MODAL Z-INDEX FIX (FINAL)
+   ========================================================================== */
+/* 
+ * 【修复】为通用的自定义提示模态框设置一个更高的 z-index。
+ * 这可以确保它总是显示在其他模态框（如AI助手模态框）的上方，
+ * 解决了导出到Notion时，成功/失败提示被遮挡的问题。
+ * 1000 是基础模态框的 z-index，1001 确保它总是在最上层。
+ */
+#custom-prompt-modal {
+    z-index: 1001;
+}
+
+/* ==========================================================================
+   36. AI REPORT CONFIRMATION BUTTON STYLES (NEW)
+   ========================================================================== */
+
+/* 【新增】报告标题和确认按钮的容器样式 */
+#report-title-container {
+    display: flex;
+    align-items: center; /* 垂直居中对齐 */
+    gap: var(--spacing-md); /* 标题和按钮之间的间距 */
+    flex-wrap: wrap; /* 在小屏幕上允许换行 */
+    margin-bottom: var(--spacing-sm);
+}
+
+/* 【新增】让标题在flex容器中可以伸缩 */
+#report-title-container #ai-report-title {
+    flex-grow: 1; /* 占据尽可能多的空间 */
+    margin: 0; /* 移除 h3 的默认外边距 */
+}
+
+/* 【新增】确认生成按钮的特定样式 */
+#ai-confirm-generate-btn {
+    flex-shrink: 0; /* 防止按钮被压缩 */
+    padding: 8px 16px; /* 按钮可以小一些 */
+    font-size: 14px;
+}
+
+/* ==========================================================================
+   37. NOTION AUTH WARNING STYLES (NEW)
+   ========================================================================== */
+
+/* 【新增】导出按钮和警告信息的包裹容器 */
+.notion-export-wrapper {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-sm); /* 按钮和警告之间的间距 */
+}
+
+/* 【新增】警告信息的具体样式 */
+#notion-auth-warning {
+    color: var(--accent-amber);
+    font-size: 13px;
+    font-weight: 500;
+    white-space: nowrap; /* 防止文字换行 */
+}
