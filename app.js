@@ -3794,13 +3794,15 @@ async function executeReportGeneration(reportType) {
 
 
 async function showAiSettingsModal() {
-    // 【MODIFIED】Get the deepseek key as well
     const { openai: openaiKey, gemini: geminiKey, deepseek: deepseekKey } = aiAssistant.getKeys();
     const selectedModel = aiAssistant.getSelectedModel();
+    // 【新增】在函数开头就检查Notion的授权状态
+    const notionAccessToken = await db.get('notion_access_token');
 
-    const htmlContent = `
+    // 【修改】将HTML内容构建为模板字符串，以便动态插入内容
+    let htmlContent = `
         <div class="ai-settings-container">
-            <!-- DeepSeek Group 【NEW】-->
+            <!-- DeepSeek Group -->
             <div class="ai-settings-group">
                 <p class="ai-settings-provider-title">DeepSeek (模型: deepseek-chat)</p>
                 <div id="deepseek-key-display" class="masked-key-wrapper ${deepseekKey ? '' : 'hidden'}">
@@ -3855,12 +3857,20 @@ async function showAiSettingsModal() {
             <div class="ai-settings-group">
                 <p class="ai-settings-provider-title">选择默认使用的AI模型</p>
                 <select id="ai-model-selector" class="header-select" style="width: 100%;">
-                    <!-- 【MODIFIED】Added DeepSeek option -->
                     <option value="deepseek" ${selectedModel === 'deepseek' ? 'selected' : ''} ${!deepseekKey ? 'disabled' : ''}>DeepSeek (deepseek-chat)</option>
                     <option value="openai" ${selectedModel === 'openai' ? 'selected' : ''} ${!openaiKey ? 'disabled' : ''}>OpenAI (o3-mini)</option>
                     <option value="gemini" ${selectedModel === 'gemini' ? 'selected' : ''} ${!geminiKey ? 'disabled' : ''}>Google Gemini (1.5 Flash)</option>
                 </select>
             </div>
+            
+            <!-- 【新增】Notion 设置区域 -->
+            ${notionAccessToken ? `
+            <div class="ai-settings-group">
+                <p class="ai-settings-provider-title">Notion 集成</p>
+                <button id="change-notion-page-btn" class="custom-prompt-btn" style="width:100%;">更改报告导出页面</button>
+            </div>
+            ` : ''}
+
         </div>
     `;
 
@@ -3875,6 +3885,7 @@ async function showAiSettingsModal() {
             if (!modal) return;
 
             // "修改" 按钮逻辑 (无需修改, 依然有效)
+            // "修改" 按钮逻辑
             modal.querySelectorAll('.masked-key-wrapper button').forEach(btn => {
                 btn.addEventListener('click', () => {
                     const provider = btn.dataset.provider;
@@ -3925,7 +3936,6 @@ async function showAiSettingsModal() {
                                 throw new Error("API Key有效，但无可访问的模型。");
                             }
                             isValid = true;
-                        // 【MODIFIED】Added validation logic for DeepSeek
                         } else if (provider === 'deepseek') {
                             const response = await fetch('https://api.deepseek.com/models', { headers: { 'Authorization': `Bearer ${key}` } });
                             if (!response.ok) {
@@ -3954,11 +3964,24 @@ async function showAiSettingsModal() {
                 });
             });
 
-            // 模型选择器逻辑 (无需修改, 依然有效)
+            // 模型选择器逻辑
             const modelSelector = document.getElementById('ai-model-selector');
             if(modelSelector) {
                 modelSelector.addEventListener('change', (e) => {
                     aiAssistant.setSelectedModel(e.target.value);
+                });
+            }
+
+            // 【新增】为“更改Notion导出页面”按钮绑定事件
+            const changeNotionPageBtn = document.getElementById('change-notion-page-btn');
+            if (changeNotionPageBtn) {
+                changeNotionPageBtn.addEventListener('click', () => {
+                    // 先关闭当前的“AI助手设置”弹窗
+                    closeCustomPrompt(() => {
+                        // 在关闭动画完成后，调用页面选择函数
+                        // 传入 false，表示这不是首次设置流程
+                        selectNotionParentPage(false); 
+                    });
                 });
             }
         }
