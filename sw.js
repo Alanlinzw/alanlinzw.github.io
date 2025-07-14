@@ -364,20 +364,31 @@ self.addEventListener('message', event => {
     const messageType = action || type;
     const port = event.ports[0];
 
+    const respond = (data) => {
+        if (port) {
+            port.postMessage(data);
+        }
+    };
+
     switch (messageType) {
-case 'triggerAutoBackup':
+        case 'triggerAutoBackup':
             console.log('[SW] Received request to trigger auto backup from client.');
-            event.waitUntil(handleAutoBackup());
+            // 【修复】确保即使是后台任务，也发送一个确认响应
+            event.waitUntil(
+                handleAutoBackup()
+                    .then(() => respond({ success: true, action: 'triggerAutoBackup', status: 'completed' }))
+                    .catch(error => respond({ success: false, action: 'triggerAutoBackup', message: error.message }))
+            );
             break;
+        
         case 'getBackupVersions':
             (async () => {
                 try {
-                    // 【修复】使用新的 backupDb 辅助库
                     const keys = await backupDb.getAllKeys();
                     // 在这里排序，确保发送到前端的是有序的
-                    if (port) port.postMessage({ success: true, versions: keys.sort((a, b) => b - a) });
+                    respond({ success: true, versions: keys.sort((a, b) => b - a) });
                 } catch (error) {
-                    if (port) port.postMessage({ success: false, message: error.message });
+                    respond({ success: false, message: error.message });
                 }
             })();
             break;
@@ -385,16 +396,14 @@ case 'triggerAutoBackup':
         case 'restoreFromBackup':
             (async () => {
                 try {
-                    // 【修复】使用新的 backupDb 辅助库
                     const restoredData = await backupDb.get(timestamp);
                     if (restoredData) {
-                        // 【修改】将恢复的数据发送回前端，由前端处理保存和UI更新
-                        if (port) port.postMessage({ success: true, data: restoredData });
+                        respond({ success: true, data: restoredData });
                     } else {
                         throw new Error('找不到指定的备份版本。');
                     }
                 } catch (error) {
-                    if (port) port.postMessage({ success: false, message: error.message });
+                    respond({ success: false, message: error.message });
                 }
             })();
             break;
@@ -407,18 +416,24 @@ case 'triggerAutoBackup':
                     setTimeout(() => checkAndShowNotifications(), delay);
                 }
             }
+            // 【修复】即使没有显式任务，也发送一个通用响应
+            respond({ success: true, action: 'SCHEDULE_REMINDER', status: 'received' });
             break;
 
         case 'skipWaiting':
             self.skipWaiting();
+            // 【修复】发送确认响应
+            respond({ success: true, action: 'skipWaiting', status: 'completed' });
             break;
             
         default:
-            // 其他如 UPDATE_REMINDER, CANCEL_REMINDER 等消息可以忽略或只打印日志
-            // console.warn('[SW] Received unhandled message:', event.data);
+            // 【修复】为未处理的消息也发送一个响应，避免通道挂起
+            console.warn('[SW] Received unhandled message, sending default response:', event.data);
+            respond({ success: false, message: 'Unhandled action', action: messageType });
             break;
     }
 });
+
 
 // sw.js
 
