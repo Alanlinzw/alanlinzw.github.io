@@ -4114,7 +4114,7 @@ async function handleExportToNotionClick() {
 async function redirectToNotionAuthPKCE() {
     // 1. 从Notion开发者中心获取您的Client ID
     const NOTION_CLIENT_ID = '22fd872b-594c-802d-bd93-0037133f9480'; // 替换为你的Client ID
-    const REDIRECT_URI = 'https://alanlinzw.github.io/efficienTodo_pwa/'; // PWA的当前URL
+    const REDIRECT_URI = 'https://alanlinzw.github.io/'; // PWA的当前URL
 
     // 2. 生成并存储 code_verifier
     const codeVerifier = generateCodeVerifier(128);
