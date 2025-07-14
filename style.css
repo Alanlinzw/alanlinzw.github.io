@@ -1821,3 +1821,29 @@ body { padding-bottom: 80px; }
     font-weight: 500;
     white-space: nowrap; /* 防止文字换行 */
 }
+
+/* ==========================================================================
+   38. BUTTON WITH ICON STYLES (NEW)
+   ========================================================================== */
+
+/* 【新增】通用规则，让包含图标的按钮支持Flexbox布局 */
+.custom-prompt-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px; /* 图标和文字之间的间距 */
+}
+
+/* 【新增】按钮内图标的通用样式 */
+.custom-prompt-btn .btn-icon {
+    width: 16px;  /* 设置图标宽度 */
+    height: 16px; /* 设置图标高度 */
+}
+
+/* 【新增】处理深色模式下Notion图标的颜色
+ * 这个规则专门针对 #export-to-notion-btn 按钮内的图标，
+ * 使用 filter 将其从黑色反转为浅色。
+ */
+[data-theme="dark"] #export-to-notion-btn .btn-icon {
+    filter: brightness(0) invert(1); /* 经典的黑变白CSS技巧 */
+}
