@@ -3690,29 +3690,87 @@ function getReportData(reportType) {
 }
 
 /**
+ * 【旧函数，将被废弃】
  * 主函数：处理报告生成流程
  * @param {string} reportType 
+ * async function handleGenerateReport(reportType) { ... }
  */
-async function handleGenerateReport(reportType) {
-    // 切换视图
-    reportOptionsGrid.classList.add('hidden'); // 隐藏选项按钮
+// (您可以删除或注释掉旧的 handleGenerateReport 函数)
+
+
+// 【新增】第一步：当用户选择报告类型时，准备确认界面
+async function prepareReportConfirmation(reportType) { // 【关键修改】添加 async
+    const reportPayload = getReportData(reportType);
+    if (!reportPayload) {
+        openCustomPrompt({ title: "错误", message: "无法获取报告数据，类型无效。", inputType: 'none', confirmText: '好的', hideCancelButton: true });
+        return;
+    }
+
+    reportOptionsGrid.classList.add('hidden');
     aiReportOutput.classList.remove('hidden');
-    aiReportLoading.classList.remove('hidden');
+    aiReportLoading.classList.add('hidden');
     aiReportContent.innerHTML = '';
+
+    aiReportTitle.textContent = reportPayload.title;
+
+    const titleContainer = document.getElementById('report-title-container');
+    
+    const oldBtn = document.getElementById('ai-confirm-generate-btn');
+    if (oldBtn) oldBtn.remove();
+    
+    const confirmBtn = document.createElement('button');
+    confirmBtn.id = 'ai-confirm-generate-btn';
+    confirmBtn.className = 'custom-prompt-btn custom-prompt-confirm'; 
+    confirmBtn.textContent = '确认生成';
+    
+    confirmBtn.onclick = () => {
+        executeReportGeneration(reportType);
+    };
+
+    titleContainer.appendChild(confirmBtn);
+
+    // 【关键修改】在UI准备好后，立即检查并更新Notion授权状态
+    await updateNotionAuthStatusUI();
+}
+
+
+// 【新增】一个专门的函数来更新Notion授权状态的UI
+async function updateNotionAuthStatusUI() {
+    const warningEl = document.getElementById('notion-auth-warning');
+    if (!warningEl) return;
+
+    try {
+        const accessToken = await db.get('notion_access_token');
+        if (accessToken) {
+            warningEl.classList.add('hidden');
+        } else {
+            warningEl.classList.remove('hidden');
+        }
+    } catch (error) {
+        console.error("检查Notion授权状态失败:", error);
+        // 出错时默认显示警告，引导用户重新授权
+        warningEl.classList.remove('hidden');
+    }
+}
+
+// 【新增】第二步：当用户点击“确认生成”后，执行AI调用
+
+async function executeReportGeneration(reportType) {
+    const confirmBtn = document.getElementById('ai-confirm-generate-btn');
+    if (confirmBtn) confirmBtn.style.display = 'none';
+
+    aiReportLoading.classList.remove('hidden');
 
     const reportPayload = getReportData(reportType);
     if (!reportPayload) {
-        aiReportContent.textContent = "无法生成报告，无效的报告类型。";
+        aiReportContent.innerHTML = `<p class="api-status error">无法生成报告，无效的报告类型。</p>`;
         aiReportLoading.classList.add('hidden');
         return;
     }
-    
-    aiReportTitle.textContent = reportPayload.title;
 
     try {
         const aiResponse = await aiAssistant.generateAIResponse(reportPayload.data, aiAssistant.REPORT_SYSTEM_PROMPT);
         
-        // 使用一个简单的 Markdown -> HTML 转换器
         const htmlContent = aiResponse
             .replace(/^### (.*$)/gim, '<h4>$1</h4>')
             .replace(/^## (.*$)/gim, '<h3>$1</h3>')
@@ -3721,9 +3779,8 @@ async function handleGenerateReport(reportType) {
             .replace(/\*\*(.*)\*\*/g, '<strong>$1</strong>')
             .replace(/\*(.*)\*/g, '<em>$1</em>')
             .replace(/^- (.*$)/gim, '<li>$1</li>')
-            .replace(/<\/li>(\s*<li)/gim, '</li>\n$1') // Add newlines between list items
+            .replace(/<\/li>(\s*<li)/gim, '</li>\n$1')
             .replace(/((<li>.*<\/li>\s*)+)/gim, '<ul>$1</ul>');
-
 
         aiReportContent.innerHTML = htmlContent;
 
@@ -3731,8 +3788,10 @@ async function handleGenerateReport(reportType) {
         aiReportContent.innerHTML = `<p class="api-status error">生成报告失败: ${error.message}</p>`;
     } finally {
         aiReportLoading.classList.add('hidden');
+        // 【移除】不再需要在这里调用 updateNotionAuthStatusUI
     }
 }
+
 
 async function showAiSettingsModal() {
     // 【MODIFIED】Get the deepseek key as well
@@ -4138,8 +4197,8 @@ async function redirectToNotionAuthPKCE() {
     const reportTitle = aiReportTitle.textContent;
     localStorage.setItem('pendingNotionExport', JSON.stringify({ title: reportTitle, content: reportContent }));
 
-    // 6. 跳转到Notion授权页面
-    window.location.href = authUrl.toString();
+    // 6. 【关键修改】使用 window.open 在新标签页中打开授权URL
+    window.open(authUrl.toString(), '_blank');
 }
 
 // 在 app.js 中，用这个新版本完整替换掉 selectNotionParentPage
@@ -4323,7 +4382,6 @@ async function executeNotionExport() {
         const parentId = await db.get('notion_parent_page_id');
 
         if (!accessToken || !parentId) {
-            // 【使用回调】先关闭“导出中”，关闭动画结束后再打开“选择页面”
             closeCustomPrompt(() => {
                 selectNotionParentPage();
             });
@@ -4348,19 +4406,60 @@ async function executeNotionExport() {
         const notionBlocks = htmlToNotionBlocks(reportHtml);
 
         let requestBody;
+        
+        // --- 【核心修复】开始 ---
         if (parentType === 'database') {
+            // 1. 动态获取数据库的标题属性名称
+            const PROXY_DB_URL = `https://notion-auth-proxy.martinlinzhiwu.workers.dev/notion-proxy/v1/databases/${parentId}`;
+            
+            const dbResponse = await fetch(PROXY_DB_URL, {
+                method: 'GET',
+                headers: {
+                    'Authorization': `Bearer ${accessToken}`,
+                    'Notion-Version': '2022-06-28'
+                }
+            });
+
+            if (!dbResponse.ok) {
+                throw new Error('无法获取目标Notion数据库的信息，请检查授权或数据库是否存在。');
+            }
+
+            const dbData = await dbResponse.json();
+            
+            // 2. 查找类型为 "title" 的属性
+            const titlePropertyName = Object.keys(dbData.properties).find(
+                key => dbData.properties[key].type === 'title'
+            );
+
+            if (!titlePropertyName) {
+                throw new Error('在目标Notion数据库中未找到标题属性(Title Property)。');
+            }
+
+            console.log(`动态识别到数据库标题属性为: "${titlePropertyName}"`);
+
+            // 3. 使用动态获取的标题属性名称构建请求体
             requestBody = {
                 parent: { database_id: parentId },
-                properties: { 'Name': { title: [{ text: { content: reportTitle } }] } }
+                properties: {
+                    [titlePropertyName]: { // 使用方括号语法动态设置属性名
+                        title: [{ text: { content: reportTitle } }]
+                    }
+                }
             };
             if (notionBlocks.length > 0) requestBody.children = notionBlocks;
-        } else {
+
+        } else { // 如果是页面，逻辑保持不变
             requestBody = {
                 parent: { page_id: parentId },
-                properties: { title: { title: [{ text: { content: reportTitle } }] } },
+                properties: { 
+                    title: { // 页面的标题属性固定为 'title'
+                        title: [{ text: { content: reportTitle } }] 
+                    } 
+                },
                 children: notionBlocks
             };
         }
+        // --- 【核心修复】结束 ---
         
         const PROXY_PAGES_URL = 'https://notion-auth-proxy.martinlinzhiwu.workers.dev/notion-proxy/v1/pages';
 
@@ -4381,14 +4480,14 @@ async function executeNotionExport() {
                  await db.set('notion_access_token', null);
                  throw new Error("Notion授权已过期或失效，请点击“导出”按钮重新授权。");
             }
-            throw new Error(`Notion API Error: ${responseData.message || responseData.error}`);
+            // 【优化】提供更详细的错误信息
+            const apiErrorMessage = responseData.message || JSON.stringify(responseData);
+            throw new Error(`Notion API Error: ${apiErrorMessage}`);
         }
         
         const newPage = responseData;
         localStorage.removeItem('pendingNotionExport');
 
-        // 【核心修复】在这里使用新的回调机制！
-        // 先关闭“正在导出...”弹窗，并告诉它在关闭动画结束后，再打开“导出成功”的弹窗。
         closeCustomPrompt(() => {
             openCustomPrompt({
                 title: "导出成功！",
@@ -4399,7 +4498,6 @@ async function executeNotionExport() {
         });
 
     } catch (error) {
-        // 在catch块里也使用同样的回调模式
         closeCustomPrompt(() => {
             openCustomPrompt({ title: "导出失败", message: error.message, confirmText: "好的" });
         });
@@ -4929,12 +5027,12 @@ if (aiPromptInput) {
         });
     }
 
-    // --- 报告选项的监听器 (逻辑不变，但确保元素引用正确) ---
-    if (reportOptionsGrid) {
+  if (reportOptionsGrid) {
         reportOptionsGrid.addEventListener('click', (e) => {
             if (e.target.tagName === 'BUTTON') {
                 const reportType = e.target.dataset.reportType;
-                handleGenerateReport(reportType);
+                // 【修改】调用新的准备函数，而不是直接生成
+                prepareReportConfirmation(reportType);
             }
         });
     }
@@ -4944,6 +5042,13 @@ if (aiPromptInput) {
         aiReportBackBtn.addEventListener('click', () => {
             reportOptionsGrid.classList.remove('hidden');
             aiReportOutput.classList.add('hidden');
+            
+            // 【新增】当返回时，清理掉“确认生成”按钮
+            const confirmBtn = document.getElementById('ai-confirm-generate-btn');
+            if (confirmBtn) confirmBtn.remove();
+            // 【新增】当返回选择时，也隐藏Notion授权警告
+            const warningEl = document.getElementById('notion-auth-warning');
+            if (warningEl) warningEl.classList.add('hidden');
         });
     }
 
