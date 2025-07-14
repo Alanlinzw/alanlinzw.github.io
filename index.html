@@ -469,8 +469,12 @@
                 <button class="header-action-btn-small" data-report-type="monthly_last">上月月报</button>
                 <button class="header-action-btn-small" data-report-type="yearly_this">年度报告</button>
             </div>
-             <div id="ai-report-output" class="hidden">
-                <h3 id="ai-report-title"></h3>
+              <div id="ai-report-output" class="hidden">
+                <!-- 【修改】为标题和按钮添加一个容器 -->
+                <div id="report-title-container">
+                    <h3 id="ai-report-title"></h3>
+                    <!-- “确认生成”按钮将由JS动态插入到这里 -->
+                </div>
                 <div id="ai-report-loading" class="ai-loading-spinner hidden">
                      <div class="spinner"></div>
                      <span>AI 正在奋笔疾书中...</span>
@@ -478,7 +482,11 @@
                 <div id="ai-report-content" class="report-content-area"></div>
                 <div class="custom-prompt-actions" style="margin-top: 1rem;">
                     <button id="ai-report-copy-btn" class="custom-prompt-btn custom-prompt-confirm">复制报告</button>
-                    <button id="export-to-notion-btn" class="custom-prompt-btn custom-prompt-confirm">导出到Notion ✨</button>
+                    <div class="notion-export-wrapper">
+                        <button id="export-to-notion-btn" class="custom-prompt-btn custom-prompt-confirm" title="首次使用需要授权，将跳转到Notion授权页面">导出到Notion ✨</button>
+                        <!-- 【新增】默认隐藏的授权警告信息 -->
+                        <span id="notion-auth-warning" class="hidden">⚠️ 需授权</span>
+                    </div>
                     <button id="ai-report-back-btn" class="custom-prompt-btn custom-prompt-cancel">返回选择</button>
                 </div>
             </div>
