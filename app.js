@@ -4527,7 +4527,7 @@ async function executeNotionExport() {
     } finally {
         if (exportBtn) {
             exportBtn.disabled = false;
-            exportBtn.textContent = "导出到Notion ✨";
+            exportBtn.innerHTML = '<img src="images/icon-notion.svg" alt="Notion Icon" class="btn-icon"><span>导出到Notion</span>';
         }
     }
 }
