@@ -1847,3 +1847,47 @@ body { padding-bottom: 80px; }
 [data-theme="dark"] #export-to-notion-btn .btn-icon {
     filter: brightness(0) invert(1); /* 经典的黑变白CSS技巧 */
 }
+
+/* ==========================================================================
+   39. AI REPORT ACTIONS - MOBILE RESPONSIVE FIX (NEW)
+   ========================================================================== */
+
+/* 默认样式（桌面端）：保持 Flexbox 的默认行(row)排列 */
+#ai-report-output .custom-prompt-actions {
+    display: flex;
+    justify-content: flex-end; /* 按钮靠右对齐 */
+    gap: var(--spacing-sm);
+    flex-wrap: wrap; /* 在空间不足时允许换行 */
+}
+
+/* 媒体查询：当屏幕宽度小于等于 768px 时 (典型的手机/平板竖屏) */
+@media (max-width: 768px) {
+    
+    /* 【修复】针对AI报告输出区域的按钮容器 */
+    #ai-report-output .custom-prompt-actions {
+        /* 1. 将主轴方向从水平改为垂直 */
+        flex-direction: column;
+        
+        /* 2. 让按钮在垂直方向上从头开始排列 */
+        justify-content: flex-start;
+        
+        /* 3. 让所有子项（按钮和包裹容器）都撑满宽度 */
+        align-items: stretch;
+    }
+
+    /* 【修复】确保每个直接子元素（按钮和包裹容器）都撑满宽度 */
+    #ai-report-output .custom-prompt-actions > * {
+        width: 100%;
+        margin: 0; /* 移除可能存在的左右外边距 */
+    }
+
+    /* 【修复】确保Notion导出按钮的包裹容器也正确布局 */
+    .notion-export-wrapper {
+        display: flex; /* 保持内部的按钮和警告信息水平排列 */
+        width: 100%;   /* 但让这个包裹容器自身撑满宽度 */
+    }
+
+    #export-to-notion-btn {
+        flex-grow: 1; /* 让Notion按钮占据尽可能多的空间 */
+    }
+}
