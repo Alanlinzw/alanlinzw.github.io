@@ -3793,23 +3793,26 @@ async function executeReportGeneration(reportType) {
 }
 
 
+// In app.js, replace the existing showAiSettingsModal function with this one.
+
 async function showAiSettingsModal() {
+    // 1. Asynchronously get all necessary data first.
     const { openai: openaiKey, gemini: geminiKey, deepseek: deepseekKey } = aiAssistant.getKeys();
     const selectedModel = aiAssistant.getSelectedModel();
-    // 【新增】在函数开头就检查Notion的授权状态
     const notionAccessToken = await db.get('notion_access_token');
 
-    // 【修改】将HTML内容构建为模板字符串，以便动态插入内容
-    let htmlContent = `
+    // 2. 构建HTML骨架。注意：这里我们不再在模板字符串中插入动态的masked key或hidden类。
+    // 所有的动态状态都将在 onRender 回调中设置，这样更可靠。
+    const htmlContent = `
         <div class="ai-settings-container">
             <!-- DeepSeek Group -->
             <div class="ai-settings-group">
                 <p class="ai-settings-provider-title">DeepSeek (模型: deepseek-chat)</p>
-                <div id="deepseek-key-display" class="masked-key-wrapper ${deepseekKey ? '' : 'hidden'}">
-                    <span id="masked-deepseek-key">${maskApiKey(deepseekKey)}</span>
+                <div id="deepseek-key-display" class="masked-key-wrapper hidden">
+                    <span id="masked-deepseek-key"></span>
                     <button class="header-action-btn-small" data-provider="deepseek">修改</button>
                 </div>
-                <div id="deepseek-key-input-area" class="ai-key-input-area ${deepseekKey ? 'hidden' : ''}">
+                <div id="deepseek-key-input-area" class="ai-key-input-area">
                     <input type="text" id="deepseek-api-key-input" class="custom-prompt-input" placeholder="请输入DeepSeek API Key...">
                     <button class="custom-prompt-btn custom-prompt-confirm" data-provider="deepseek">验证</button>
                 </div>
@@ -3822,11 +3825,11 @@ async function showAiSettingsModal() {
             <!-- OpenAI Group -->
             <div class="ai-settings-group">
                 <p class="ai-settings-provider-title">OpenAI (模型: o3-mini)</p>
-                <div id="openai-key-display" class="masked-key-wrapper ${openaiKey ? '' : 'hidden'}">
-                    <span id="masked-openai-key">${maskApiKey(openaiKey)}</span>
+                <div id="openai-key-display" class="masked-key-wrapper hidden">
+                    <span id="masked-openai-key"></span>
                     <button class="header-action-btn-small" data-provider="openai">修改</button>
                 </div>
-                <div id="openai-key-input-area" class="ai-key-input-area ${openaiKey ? 'hidden' : ''}">
+                <div id="openai-key-input-area" class="ai-key-input-area">
                     <input type="text" id="openai-api-key-input" class="custom-prompt-input" placeholder="请输入Openai api key...">
                     <button class="custom-prompt-btn custom-prompt-confirm" data-provider="openai">验证</button>
                 </div>
@@ -3839,11 +3842,11 @@ async function showAiSettingsModal() {
             <!-- Gemini Group -->
             <div class="ai-settings-group">
                 <p class="ai-settings-provider-title">Google Gemini (模型: Gemini 1.5 Flash)</p>
-                <div id="gemini-key-display" class="masked-key-wrapper ${geminiKey ? '' : 'hidden'}">
-                    <span id="masked-gemini-key">${maskApiKey(geminiKey)}</span>
+                <div id="gemini-key-display" class="masked-key-wrapper hidden">
+                    <span id="masked-gemini-key"></span>
                     <button class="header-action-btn-small" data-provider="gemini">修改</button>
                 </div>
-                <div id="gemini-key-input-area" class="ai-key-input-area ${geminiKey ? 'hidden' : ''}">
+                <div id="gemini-key-input-area" class="ai-key-input-area">
                     <input type="text" id="gemini-api-key-input" class="custom-prompt-input" placeholder="请输入Gemini api key...">
                     <button class="custom-prompt-btn custom-prompt-confirm" data-provider="gemini">验证</button>
                 </div>
@@ -3852,25 +3855,23 @@ async function showAiSettingsModal() {
                 </p>
                 <p id="gemini-status" class="api-status"></p>
             </div>
-
-            <!-- Model Selector Group -->
-            <div class="ai-settings-group">
-                <p class="ai-settings-provider-title">选择默认使用的AI模型</p>
-                <select id="ai-model-selector" class="header-select" style="width: 100%;">
-                    <option value="deepseek" ${selectedModel === 'deepseek' ? 'selected' : ''} ${!deepseekKey ? 'disabled' : ''}>DeepSeek (deepseek-chat)</option>
-                    <option value="openai" ${selectedModel === 'openai' ? 'selected' : ''} ${!openaiKey ? 'disabled' : ''}>OpenAI (o3-mini)</option>
-                    <option value="gemini" ${selectedModel === 'gemini' ? 'selected' : ''} ${!geminiKey ? 'disabled' : ''}>Google Gemini (1.5 Flash)</option>
-                </select>
+        
+            <div class="ai-settings-global-controls" style="padding-top: 10px;">
+                <div class="ai-settings-group">
+                    <p class="ai-settings-provider-title">选择默认使用的AI模型</p>
+                    <select id="ai-model-selector" class="header-select" style="width: 100%;">
+                        <option value="deepseek">DeepSeek (deepseek-chat)</option>
+                        <option value="openai">OpenAI (o3-mini)</option>
+                        <option value="gemini">Google Gemini (1.5 Flash)</option>
+                    </select>
+                </div>
+                ${notionAccessToken ? `
+                <div class="ai-settings-group" style="margin-top: 15px;">
+                    <p class="ai-settings-provider-title">Notion 集成</p>
+                    <button id="change-notion-page-btn" class="custom-prompt-btn" style="width:100%;">更改报告导出页面</button>
+                </div>
+                ` : ''}
             </div>
-            
-            <!-- 【新增】Notion 设置区域 -->
-            ${notionAccessToken ? `
-            <div class="ai-settings-group">
-                <p class="ai-settings-provider-title">Notion 集成</p>
-                <button id="change-notion-page-btn" class="custom-prompt-btn" style="width:100%;">更改报告导出页面</button>
-            </div>
-            ` : ''}
-
         </div>
     `;
 
@@ -3884,7 +3885,33 @@ async function showAiSettingsModal() {
             const modal = document.getElementById('custom-prompt-modal');
             if (!modal) return;
 
-            // "修改" 按钮逻辑 (无需修改, 依然有效)
+            const providers = {
+                openai: openaiKey,
+                gemini: geminiKey,
+                deepseek: deepseekKey
+            };
+
+            // 3. 【核心修正】在 onRender 回调中，根据数据动态设置UI
+            for (const provider in providers) {
+                const key = providers[provider];
+                const displayArea = document.getElementById(`${provider}-key-display`);
+                const inputArea = document.getElementById(`${provider}-key-input-area`);
+                const maskedKeySpan = document.getElementById(`masked-${provider}-key`);
+
+                if (key) {
+                    // 如果key存在，显示masked-key区域，隐藏输入区域
+                    maskedKeySpan.textContent = maskApiKey(key);
+                    displayArea.classList.remove('hidden');
+                    inputArea.classList.add('hidden');
+                } else {
+                    // 如果key不存在，隐藏masked-key区域，显示输入区域
+                    displayArea.classList.add('hidden');
+                    inputArea.classList.remove('hidden');
+                }
+            }
+            
+            // 4. 为所有按钮绑定事件监听器
+            
             // "修改" 按钮逻辑
             modal.querySelectorAll('.masked-key-wrapper button').forEach(btn => {
                 btn.addEventListener('click', () => {
@@ -3892,12 +3919,13 @@ async function showAiSettingsModal() {
                     document.getElementById(`${provider}-key-display`).classList.add('hidden');
                     document.getElementById(`${provider}-key-input-area`).classList.remove('hidden');
                     const inputField = document.getElementById(`${provider}-api-key-input`);
-                    inputField.value = aiAssistant.getKeys()[provider] || '';
+                    // 从我们已经获取的 storageData 中设置初始值，避免再次异步调用
+                    inputField.value = providers[provider] || '';
                     inputField.focus();
                 });
             });
 
-            // "验证" 按钮逻辑
+            // "验证" 按钮逻辑 (保持不变，但逻辑清晰)
             modal.querySelectorAll('.ai-key-input-area button').forEach(btn => {
                 btn.addEventListener('click', async () => {
                     const provider = btn.dataset.provider;
@@ -3917,41 +3945,48 @@ async function showAiSettingsModal() {
 
                     try {
                         let isValid = false;
-                        if (provider === 'openai') {
-                            const response = await fetch('https://api.openai.com/v1/models', { headers: { 'Authorization': `Bearer ${key}` } });
-                            if (!response.ok) {
-                                const errorData = await response.json();
-                                throw new Error(errorData.error.message || `HTTP ${response.status}`);
-                            }
-                            isValid = true;
-                        } else if (provider === 'gemini') {
-                            const validationUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${key}`;
-                            const response = await fetch(validationUrl);
-                            if (!response.ok) {
-                                const errorData = await response.json();
-                                throw new Error(errorData.error.message || `HTTP ${response.status}`);
-                            }
-                            const data = await response.json();
-                            if (!data.models || data.models.length === 0) {
-                                throw new Error("API Key有效，但无可访问的模型。");
-                            }
-                            isValid = true;
-                        } else if (provider === 'deepseek') {
-                            const response = await fetch('https://api.deepseek.com/models', { headers: { 'Authorization': `Bearer ${key}` } });
-                            if (!response.ok) {
-                                const errorData = await response.json();
-                                throw new Error(errorData.error.message || `HTTP ${response.status}`);
-                            }
-                            isValid = true;
+                        let testEndpoint, headers;
+                        
+                        switch(provider) {
+                            case 'openai':
+                                testEndpoint = 'https://api.openai.com/v1/models';
+                                headers = { 'Authorization': `Bearer ${key}` };
+                                break;
+                            case 'gemini':
+                                testEndpoint = `https://generativelanguage.googleapis.com/v1beta/models?key=${key}`;
+                                headers = {};
+                                break;
+                            case 'deepseek':
+                                testEndpoint = 'https://api.deepseek.com/models';
+                                headers = { 'Authorization': `Bearer ${key}` };
+                                break;
+                        }
+
+                        const response = await fetch(testEndpoint, { headers });
+
+                        if (!response.ok) {
+                            const errorData = await response.json();
+                            const errorMessage = (errorData.error && errorData.error.message) ? errorData.error.message : `HTTP ${response.status}`;
+                            throw new Error(errorMessage);
                         }
                         
+                        if(provider === 'gemini') {
+                             const data = await response.json();
+                             if (!data.models || data.models.length === 0) {
+                                throw new Error("API Key有效，但无可访问的模型。");
+                             }
+                        }
+
+                        isValid = true;
+                        
                         if (isValid) {
-                            aiAssistant.saveKey(provider, key);
+                            await aiAssistant.saveKey(provider, key);
                             statusEl.textContent = "验证成功并已保存！";
                             statusEl.className = 'api-status success';
-                            document.querySelector(`#ai-model-selector option[value=${provider}]`).disabled = false;
-                            document.getElementById(`${provider}-key-display`).classList.remove('hidden');
+                            
+                            // 验证成功后，立即更新UI
                             document.getElementById(`masked-${provider}-key`).textContent = maskApiKey(key);
+                            document.getElementById(`${provider}-key-display`).classList.remove('hidden');
                             document.getElementById(`${provider}-key-input-area`).classList.add('hidden');
                         }
 
@@ -3963,26 +3998,20 @@ async function showAiSettingsModal() {
                     }
                 });
             });
-
+            
             // 模型选择器逻辑
             const modelSelector = document.getElementById('ai-model-selector');
             if(modelSelector) {
+                modelSelector.value = selectedModel;
                 modelSelector.addEventListener('change', (e) => {
                     aiAssistant.setSelectedModel(e.target.value);
                 });
             }
 
-            // 【新增】为“更改Notion导出页面”按钮绑定事件
+            // Notion按钮逻辑
             const changeNotionPageBtn = document.getElementById('change-notion-page-btn');
             if (changeNotionPageBtn) {
-                changeNotionPageBtn.addEventListener('click', () => {
-                    // 先关闭当前的“AI助手设置”弹窗
-                    closeCustomPrompt(() => {
-                        // 在关闭动画完成后，调用页面选择函数
-                        // 传入 false，表示这不是首次设置流程
-                        selectNotionParentPage(false); 
-                    });
-                });
+                changeNotionPageBtn.addEventListener('click', () => closeCustomPrompt(() => selectNotionParentPage(false)));
             }
         }
     });
@@ -4527,7 +4556,7 @@ async function executeNotionExport() {
     } finally {
         if (exportBtn) {
             exportBtn.disabled = false;
-            exportBtn.innerHTML = '<img src="images/icon-notion.svg" alt="Notion Icon" class="btn-icon"><span>导出到Notion</span>';
+            exportBtn.textContent = "导出到Notion ✨";
         }
     }
 }
