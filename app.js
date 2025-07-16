@@ -742,13 +742,9 @@ async function syncWithCloudOnStartup() {
         return;
     }
     
-    // 如果本地没有设置过首次同步完成的标志，也跳过，等待用户手动发起首次同步
-    const isFirstSyncCompleted = await db.get('isFirstSyncCompleted');
-    if (isFirstSyncCompleted !== true) {
-        console.log("启动时同步已跳过：等待用户完成首次手动同步。");
-        if (syncStatusSpan) syncStatusSpan.textContent = '请手动同步以关联云端';
-        return;
-    }
+    // 【核心修复】移除'isFirstSyncCompleted'检查。
+    // 启动时同步的唯一职责就是从云端获取权威数据，无论是不是首次。
+    // 如果用户从未手动同步过，云端文件可能是空的，这没关系，下载空数据也是正确的行为。
 
     console.log("启动时同步开始：强制从云端更新。");
     syncDriveBtn.disabled = true;
@@ -758,9 +754,16 @@ async function syncWithCloudOnStartup() {
         // --- 认证与文件查找 ---
         if (!driveSync.tokenClient) await loadGoogleApis();
         const token = driveSync.gapi.client.getToken();
+        // 如果没有token，静默请求一次。如果需要弹窗，它会自动处理。
         if (token === null) await driveSync.authenticate();
         await driveSync.findOrCreateFile();
-        if (!driveSync.driveFileId) throw new Error('启动时同步失败：未找到云端文件。');
+        if (!driveSync.driveFileId) {
+             // 如果找不到文件ID，很可能是新用户且授权未完成，此时不应抛出错误，而是静默退出
+             console.warn('启动时同步中止：未找到云端文件ID，可能需要用户手动发起首次同步。');
+             if (syncStatusSpan) syncStatusSpan.textContent = '请手动同步以关联云端';
+             syncDriveBtn.disabled = false;
+             return;
+        }
 
         // --- 无条件下载云端数据 ---
         const cloudData = await driveSync.download();
@@ -768,18 +771,18 @@ async function syncWithCloudOnStartup() {
         // --- 检查云端数据是否有效 ---
         if (cloudData && typeof cloudData === 'object' && Object.keys(cloudData).length > 0) {
             console.log("启动时同步：发现有效云端数据，将覆盖本地。");
+            
             // 直接将云端数据赋给全局变量
             allTasks = cloudData;
             
             // 将云端数据保存到本地 IndexedDB
-            // 注意：这里我们不需要更新时间戳，因为我们直接采用了云端的时间戳
             await db.set('allTasks', allTasks);
             
             // 刷新UI以显示最新的数据
             renderAllLists();
             if (syncStatusSpan) syncStatusSpan.textContent = '已从云端更新！';
         } else {
-            console.log("启动时同步：云端无数据或数据为空，不执行任何操作。");
+            console.log("启动时同步：云端无数据或数据为空，不执行任何本地更改。");
             if (syncStatusSpan) syncStatusSpan.textContent = ''; // 清空状态
         }
 
@@ -790,20 +793,28 @@ async function syncWithCloudOnStartup() {
     } catch (error) {
         console.error("启动时自动同步失败:", error);
         if (syncStatusSpan) {
-            const errorMessage = error.message || '未知错误';
-            syncStatusSpan.textContent = `启动时同步错误: ${errorMessage.substring(0, 30)}...`;
+            // 对用户更友好的错误提示
+            let errorMessage = "未知错误";
+            if (error.message.includes("popup_closed_by_user") || error.message.includes("access_denied")) {
+                errorMessage = "用户取消了授权";
+            } else if (error.message.includes("popup_failed_to_open")) {
+                errorMessage = "授权弹窗被阻止";
+            } else {
+                errorMessage = error.message;
+            }
+            syncStatusSpan.textContent = `启动同步错误: ${errorMessage.substring(0, 30)}...`;
         }
     } finally {
         // 无论成功与否，都要确保按钮最终被释放
         syncDriveBtn.disabled = false;
         setTimeout(() => {
+            // 清理掉成功的提示信息
             if (syncStatusSpan && syncStatusSpan.textContent.includes('更新')) {
                 syncStatusSpan.textContent = '';
             }
         }, 5000);
     }
 }
-
 
 async function loadGoogleApis() {
     return new Promise((resolve, reject) => {
