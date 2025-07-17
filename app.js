@@ -741,59 +741,87 @@ async function syncWithCloudOnStartup() {
         console.log("启动时同步已跳过：手动同步可能正在进行中。");
         return;
     }
-    
-    // 【核心修复】移除'isFirstSyncCompleted'检查。
-    // 启动时同步的唯一职责就是从云端获取权威数据，无论是不是首次。
-    // 如果用户从未手动同步过，云端文件可能是空的，这没关系，下载空数据也是正确的行为。
 
-    console.log("启动时同步开始：强制从云端更新。");
+    console.log("启动时同步开始：智能检查云端数据。");
     syncDriveBtn.disabled = true;
     if (syncStatusSpan) syncStatusSpan.textContent = '正在从云端检查更新...';
 
     try {
-        // --- 认证与文件查找 ---
+        // --- 认证与文件查找 (保持不变) ---
         if (!driveSync.tokenClient) await loadGoogleApis();
         const token = driveSync.gapi.client.getToken();
-        // 如果没有token，静默请求一次。如果需要弹窗，它会自动处理。
         if (token === null) await driveSync.authenticate();
         await driveSync.findOrCreateFile();
         if (!driveSync.driveFileId) {
-             // 如果找不到文件ID，很可能是新用户且授权未完成，此时不应抛出错误，而是静默退出
              console.warn('启动时同步中止：未找到云端文件ID，可能需要用户手动发起首次同步。');
              if (syncStatusSpan) syncStatusSpan.textContent = '请手动同步以关联云端';
              syncDriveBtn.disabled = false;
              return;
         }
 
-        // --- 无条件下载云端数据 ---
+        // --- 下载云端数据 ---
         const cloudData = await driveSync.download();
+        const todayString = getTodayString();
 
-        // --- 检查云端数据是否有效 ---
+        // --- 智能同步逻辑 ---
         if (cloudData && typeof cloudData === 'object' && Object.keys(cloudData).length > 0) {
-            console.log("启动时同步：发现有效云端数据，将覆盖本地。");
             
-            // 直接将云端数据赋给全局变量
-            allTasks = cloudData;
-            
-            // 将云端数据保存到本地 IndexedDB
-            await db.set('allTasks', allTasks);
-            
-            // 刷新UI以显示最新的数据
-            renderAllLists();
-            if (syncStatusSpan) syncStatusSpan.textContent = '已从云端更新！';
+            // 情况一：云端数据是今天的，说明其他设备已更新，直接覆盖本地
+            if (cloudData.lastDailyResetDate === todayString) {
+                console.log("启动时同步：云端数据已是最新，将覆盖本地。");
+                allTasks = cloudData;
+                await db.set('allTasks', allTasks);
+                renderAllLists();
+                if (syncStatusSpan) syncStatusSpan.textContent = '已从云端更新！';
+
+            // 情况二：云端数据是昨天的（或更早），说明本设备是今天第一个启动的
+            } else {
+                console.log("启动时同步：本设备为今日首次启动，将重置云端数据并同步。");
+                if (syncStatusSpan) syncStatusSpan.textContent = '为新的一天准备数据...';
+
+                // 1. 以云端数据为基础
+                let dataToReset = cloudData;
+                
+                // 2. 对其应用每日清理逻辑
+                // 这里我们直接复用 cleanupDailyTasks 的核心逻辑
+                if (dataToReset.daily && dataToReset.daily.length > 0) {
+                    const tasksToKeep = [];
+                    dataToReset.daily.forEach(task => {
+                        if (task.fromFuture) return; // 移除过期的计划任务
+                        if (task.cycle === 'once' && task.creationDate !== todayString) return; // 移除过期的单次任务
+                        
+                        // 重置重复任务的状态
+                        if (task.completed) task.completed = false;
+                        tasksToKeep.push(task);
+                    });
+                    dataToReset.daily = tasksToKeep;
+                }
+                dataToReset.lastDailyResetDate = todayString; // 更新日期戳
+                
+                // 3. 将这份处理好的“今日新数据”作为权威数据
+                allTasks = dataToReset;
+                await db.set('allTasks', allTasks); // 保存到本地
+                renderAllLists(); // 刷新UI
+
+                // 4. 【关键】将这份新数据立即上传回云端
+                console.log("启动时同步：将重置后的今日数据上传回云端。");
+                await driveSync.upload(allTasks);
+                if (syncStatusSpan) syncStatusSpan.textContent = '新的一天，数据已同步！';
+            }
+
         } else {
-            console.log("启动时同步：云端无数据或数据为空，不执行任何本地更改。");
-            if (syncStatusSpan) syncStatusSpan.textContent = ''; // 清空状态
+            // 云端无数据或为空，说明是全新安装，本地数据（已在 `runAutomaticUpkeepTasks` 中重置）将成为权威版本
+            console.log("启动时同步：云端无数据，将上传本地数据。");
+            await driveSync.upload(allTasks);
+            if (syncStatusSpan) syncStatusSpan.textContent = '已初始化云端数据！';
         }
 
-        // 标记数据为“干净”，因为已经和云端同步了
         isDataDirty = false;
         updateSyncIndicator();
 
     } catch (error) {
         console.error("启动时自动同步失败:", error);
         if (syncStatusSpan) {
-            // 对用户更友好的错误提示
             let errorMessage = "未知错误";
             if (error.message.includes("popup_closed_by_user") || error.message.includes("access_denied")) {
                 errorMessage = "用户取消了授权";
@@ -805,14 +833,12 @@ async function syncWithCloudOnStartup() {
             syncStatusSpan.textContent = `启动同步错误: ${errorMessage.substring(0, 30)}...`;
         }
     } finally {
-        // 无论成功与否，都要确保按钮最终被释放
         syncDriveBtn.disabled = false;
         setTimeout(() => {
-            // 清理掉成功的提示信息
-            if (syncStatusSpan && syncStatusSpan.textContent.includes('更新')) {
+            if (syncStatusSpan && (syncStatusSpan.textContent.includes('更新') || syncStatusSpan.textContent.includes('同步'))) {
                 syncStatusSpan.textContent = '';
             }
-        }, 5000);
+        }, 7000);
     }
 }
 
@@ -5916,38 +5942,31 @@ if (!statsModal) {
         if (syncStatusSpan) syncStatusSpan.textContent = 'Google 服务加载失败。';
     }
 
+   // --- 【核心逻辑修改】 ---
     try {
-        // 【第1步】先从本地加载数据，让用户能立刻看到内容，避免白屏
+        // 1. 先从本地DB加载数据，让应用能快速响应并避免白屏
         await loadTasks();
-        console.log("initializeApp: 任务已从本地 DB 加载，UI将首先渲染此版本。");
-        renderAllLists();
-        
-        // 【第2步】在后台启动强制云端同步流程
-        // 这个函数会处理UI状态，并在完成后刷新列表
-        await syncWithCloudOnStartup();
+        console.log("initializeApp: 本地数据已加载。");
 
-        // 【第3步】在同步完成后，基于最新的数据执行自动维护任务
-        console.log("initializeApp: 在同步后的数据上执行自动维护任务...");
-        
-        let upkeepChangedData = false;
-        if (cleanupDailyTasks()) upkeepChangedData = true;
-        
-        // 之前版本的 checkAndMoveFutureTasks 会自动保存，我们需要统一控制
-        const moved = checkAndMoveFutureTasks(); // 此函数现在只移动数据，不保存
-        if (moved) upkeepChangedData = true;
-        
-        // 如果任何维护任务修改了数据，则进行一次保存
-        if (upkeepChangedData) {
-            console.log("initializeApp: 自动维护任务修改了数据，正在保存...");
-            await saveTasks(); // 这会更新时间戳并标记为 dirty
-            renderAllLists(); // 再次渲染以显示维护任务的结果
-        }
+        // 2. 【关键】在进行任何网络同步之前，先对本地加载的数据执行每日维护任务。
+        // 这会重置每日任务等，为新的一天做准备。
+        // runAutomaticUpkeepTasks 函数内部会处理数据变更、保存和必要的UI重绘。
+        console.log("initializeApp: 在云同步前执行本地每日维护...");
+        await runAutomaticUpkeepTasks();
+
+        // 3. 现在，执行启动时云同步。
+        // 它会从云端拉取权威数据，并覆盖本地数据。
+        // 这是正确的行为，因为如果其他设备在今天已经更新了任务，云端数据会是最新的。
+        console.log("initializeApp: 开始执行启动时云同步...");
+        await syncWithCloudOnStartup();
 
     } catch (e) {
         console.error("initializeApp: 初始数据加载或处理时发生严重错误:", e);
         openCustomPrompt({ title: "加载数据失败", message: `无法加载或处理您的数据：${e.message}`, inputType: 'none', confirmText: '好的', hideCancelButton: true });
-        return; // 关键：如果数据加载失败，终止初始化
+        return; // 如果数据加载失败，终止初始化
     }
+    // --- 【核心逻辑修改结束】 ---
+
 
     // 7. 渲染和最终设置
     renderAllLists();
