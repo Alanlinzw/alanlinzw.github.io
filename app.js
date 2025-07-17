@@ -799,6 +799,8 @@ async function syncWithCloudOnStartup() {
 
         const cloudModifiedTime = new Date(fileMeta.modifiedTime).getTime();
         const localLastUpdate = allTasks.lastUpdatedLocal || 0;
+        const cloudData = await driveSync.download();
+        const todayString = getTodayString();
 
          // --- 智能同步逻辑 ---
         if (cloudData && typeof cloudData === 'object' && Object.keys(cloudData).length > 0) {
