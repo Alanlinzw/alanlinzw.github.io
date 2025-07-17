@@ -4609,112 +4609,54 @@ window.addEventListener('visibilitychange', () => {
 // 当窗口获得焦点时也触发（作为补充）
 window.addEventListener('focus', triggerSync);
 
-    // 【全新、简化的手动同步逻辑】
-    if (syncDriveBtn && syncStatusSpan) {
-        syncDriveBtn.addEventListener('click', async () => {
-            if (autoSyncTimer) {
-                clearTimeout(autoSyncTimer);
-                autoSyncTimer = null;
-                console.log('手动同步已启动，待处理的自动同步已取消。');
-            }
-    
-            console.log("手动同步按钮被点击：将上传本地数据。");
-            syncStatusSpan.textContent = '准备上传...';
-            syncDriveBtn.disabled = true;
+ if (syncDriveBtn && syncStatusSpan) {
+    syncDriveBtn.addEventListener('click', async () => {
+        // Stop any pending auto-sync
+        if (autoSyncTimer) {
+            clearTimeout(autoSyncTimer);
+            autoSyncTimer = null;
+        }
+
+        console.log("Manual sync: Pushing local data to cloud.");
+        syncStatusSpan.textContent = '准备同步...';
+        syncDriveBtn.disabled = true;
 
         try {
-            // 1. 统一的认证和文件查找
-            if (!driveSync.tokenClient) await loadGoogleApis();
-            const token = driveSync.gapi.client.getToken();
-            if (token === null) await driveSync.authenticate();
+            // This will automatically handle getting a valid token or prompting for re-auth
             await driveSync.findOrCreateFile();
-            if (!driveSync.driveFileId) throw new Error('同步失败：未找到或创建云端文件。');
 
-            // 2. 【核心】检查是否为首次同步
-            const isFirstSyncCompleted = await db.get('isFirstSyncCompleted');
-
-            if (isFirstSyncCompleted !== true) {
-                // *** 这是首次同步的逻辑：下载并合并 ***
-                console.log("首次同步：将从云端下载数据以初始化本地。");
-                syncStatusSpan.textContent = '首次关联，正从云端下载...';
-                
-                const cloudData = await driveSync.download();
-
-                // 如果云端有数据，则用云端数据覆盖本地的空壳
-                if (cloudData && typeof cloudData === 'object' && Object.keys(cloudData).length > 0) {
-                    console.log("首次同步：发现云端数据，将覆盖本地。");
-                    allTasks = cloudData; // 使用云端数据
-                    await db.set('allTasks', allTasks); // 保存到本地DB
-                    renderAllLists(); // 刷新UI
-                    syncStatusSpan.textContent = '已成功从云端恢复数据！';
-                } else {
-                    console.log("首次同步：云端无数据，本地数据将成为初始版本。");
-                    // 云端也是空的，说明这真的是一个全新的开始，什么都不用做，直接上传本地的空壳即可。
-                    // 这种情况会在下一步的上传逻辑中处理。
-                    await driveSync.upload(allTasks);
-                    syncStatusSpan.textContent = '已成功初始化云端数据！';
-                }
-                
-                // 标记首次同步完成
-                await db.set('isFirstSyncCompleted', true);
-
-            } else {
-                    // 【核心修改】在上传前再次检查
-    if (!isDataDirty) {
-        console.log("日常同步：数据未修改，取消上传。");
-        syncStatusSpan.textContent = '数据已是最新';
-        // 注意：因为我们在这里提前退出了，需要手动处理UI状态
-        syncDriveBtn.disabled = false; // 重新启用按钮
-        setTimeout(() => { syncStatusSpan.textContent = ''; }, 3000);
-        return; // 提前退出，不执行上传
-    }
-                // *** 这是日常同步的逻辑：上传本地更新 ***
-                console.log("日常同步：将上传本地数据。");
-                syncStatusSpan.textContent = '正在上传到云端...';
-                
-                // 在上传前，执行一次自动维护，确保状态最新
-                await runAutomaticUpkeepTasks();
-                
-                const uploadResult = await driveSync.upload(allTasks);
-                syncStatusSpan.textContent = uploadResult.message;
+            if (!isDataDirty) {
+                console.log("Manual sync: No local changes to push.");
+                syncStatusSpan.textContent = '数据已是最新';
+                setTimeout(() => { if(syncStatusSpan.textContent === '数据已是最新') syncStatusSpan.textContent = ''; }, 3000);
+                return; // Exit early if there's nothing to sync
             }
 
-            // 同步成功后的通用处理
+            syncStatusSpan.textContent = '正在上传...';
+            await driveSync.upload(allTasks);
+
+            // --- Success Logic ---
             isDataDirty = false;
-            updateSyncIndicator();
+            updateSyncIndicator(); // This will show '已同步'
             const timeString = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
             localStorage.setItem('lastSyncTime', timeString);
-            setTimeout(() => { 
-                if (!isDataDirty && syncStatusSpan.textContent.includes('同步')) {
+            syncStatusSpan.textContent = `已于 ${timeString} 同步`;
+            setTimeout(() => {
+                // Clear the success message after a few seconds
+                 if (syncStatusSpan.textContent.includes('同步')) {
                     syncStatusSpan.textContent = '';
-                }
+                 }
             }, 7000);
 
         } catch (error) {
-                console.error("手动同步操作失败:", error);
-                const errorMessage = error.message || '未知错误';
+            console.error("Manual sync failed:", error);
+            const errorMessage = error.message || '未知错误';
+            if (error.message !== "REAUTH_REQUIRED") { // The prompt is already shown by gapiClientRequest
                 syncStatusSpan.textContent = `同步错误: ${errorMessage.substring(0, 40)}...`;
-                 openCustomPrompt({
-                    title: "同步失败",
-                    message: `与云端同步时发生错误：\n${errorMessage}\n\n请检查您的网络连接和Google账户权限后重试。`,
-                    inputType: 'none',
-                    confirmText: '好的',
-                    hideCancelButton: true
-                });
-            } finally {
-                syncDriveBtn.disabled = false;
-                console.log("Sync: 同步流程结束，按钮已重新启用。");
-                if (syncSucceeded) {
-                    isDataDirty = false;
-                    updateSyncIndicator();
-                const timeString = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                localStorage.setItem('lastSyncTime', timeString);
-                setTimeout(() => { 
-                    if (!isDataDirty && syncStatusSpan.textContent.includes('同步')) {
-                        syncStatusSpan.textContent = '';
-                    }
-                 }, 7000);
             }
+        } finally {
+            // This block ALWAYS runs
+            syncDriveBtn.disabled = false;
         }
     });
 }
