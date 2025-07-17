@@ -835,27 +835,54 @@ async function syncWithCloudOnStartup() {
 }
 
 async function loadGoogleApis() {
+    // This new function dynamically loads the GAPI script and uses its
+    // official callback mechanism, which is much more reliable than polling.
     return new Promise((resolve, reject) => {
-        const checkGapi = setInterval(() => {
-            // 我们只需要 gapi.client
-            if (window.gapi && window.gapi.client) {
-                clearInterval(checkGapi);
-                console.log("loadGoogleApis: GAPI client library loaded.");
-                
-                // 初始化 GAPI 客户端
-                window.gapi.client.init({
-                    apiKey: driveSync.API_KEY,
-                    discoveryDocs: driveSync.DISCOVERY_DOCS,
-                }).then(resolve, reject);
-            }
-        }, 100);
+        // 1. Set a general timeout for the entire process. 20 seconds is more generous.
+        const timeoutId = setTimeout(() => {
+            reject(new Error("Loading Google API timed out. Please check your network connection."));
+        }, 20000); // 20-second timeout
 
-        setTimeout(() => {
-            if (!window.gapi || !window.gapi.client) {
-                clearInterval(checkGapi);
-                reject(new Error("Loading Google API client timed out."));
-            }
-        }, 15000); // 15秒超时
+        // 2. Define a callback function that GAPI will call once its script is loaded.
+        window.gapiLoaded = () => {
+            console.log("gapi.js script loaded. Now loading 'client' module...");
+            // Now that gapi is loaded, we use its own loader for the 'client' module.
+            window.gapi.load('client', {
+                callback: async () => {
+                    try {
+                        console.log("GAPI 'client' module loaded. Initializing...");
+                        // The client is loaded, now initialize it with our config.
+                        await window.gapi.client.init({
+                            apiKey: driveSync.API_KEY,
+                            discoveryDocs: driveSync.DISCOVERY_DOCS,
+                        });
+                        console.log("Google API client initialized successfully.");
+                        clearTimeout(timeoutId); // Success, so clear the timeout.
+                        resolve(); // Resolve the main promise.
+                    } catch (initError) {
+                        clearTimeout(timeoutId);
+                        reject(initError);
+                    }
+                },
+                onerror: (err) => {
+                    console.error("Error loading GAPI client module:", err);
+                    clearTimeout(timeoutId);
+                    reject(new Error("Failed to load a required Google client module."));
+                },
+            });
+        };
+
+        // 3. Dynamically create and inject the script tag into the page.
+        // We use the `onload=gapiLoaded` query parameter, which is the official way.
+        const script = document.createElement('script');
+        script.src = 'https://apis.google.com/js/api.js?onload=gapiLoaded';
+        script.async = true;
+        script.defer = true;
+        script.onerror = () => {
+            clearTimeout(timeoutId);
+            reject(new Error("Failed to load Google API script. Check for network issues or ad-blockers."));
+        };
+        document.head.appendChild(script);
     });
 }
 function updateSyncIndicator() {
@@ -5849,43 +5876,47 @@ if (!statsModal) {
     console.log("initializeApp: 主题和通知设置已加载。");
     await handleNotionCallback(); 
     // 4. 加载 Google API
+  
   try {
-        // 1. Handle potential OAuth2 callback from Google redirect
-        await handleGoogleAuthCallback();
-
-        // 2. Load Google API libraries
-        await loadGoogleApis();
-
-        // 3. Load local data from IndexedDB so the user sees their content ASAP
         await loadTasks();
         renderAllLists();
         initSortable();
-        console.log("initializeApp: Local data loaded and rendered.");
+        if (ledgerDateInput) ledgerDateInput.valueAsDate = new Date();
+        switchView('daily-section');
+        console.log("initializeApp: Local data loaded and UI rendered.");
 
-        // 4. In the background, perform daily maintenance on the loaded data
+        // Perform daily maintenance tasks on the now-loaded local data.
         await runAutomaticUpkeepTasks();
+    } catch (localError) {
+        console.error("initializeApp: A critical error occurred loading local data:", localError);
+        openCustomPrompt({ title: "本地数据加载失败", message: localError.message, inputType: 'none', confirmText: '好的', hideCancelButton: true });
+        return; // Stop if we can't even load local data.
+    }
+
+    // --- Part 3: Asynchronously Initialize Cloud Services ---
+    // This part now runs after the user can see their data.
+    // Failure here will not block the UI.
+    try {
+        // Handle potential OAuth2 callback from Google redirect FIRST.
+        await handleGoogleAuthCallback();
+        await handleNotionCallback();
         
-        // 5. Finally, check against the cloud for any newer versions
+        // Now, attempt to load the Google APIs.
+        console.log("initializeApp: Attempting to initialize Google Cloud services...");
+        await loadGoogleApis(); // Using the new robust function
+        
+        // If successful, proceed with the initial cloud sync check.
         await syncWithCloudOnStartup();
+        console.log("initializeApp: Google Cloud services initialized and checked.");
 
-    } catch (e) {
-        console.error("initializeApp: A critical error occurred during initialization:", e);
-        if (!String(e.message).includes("Google API")) { // Avoid redundant alerts
-             openCustomPrompt({ title: "应用启动失败", message: e.message, inputType: 'none', confirmText: '好的', hideCancelButton: true });
-        }
-        return; // Stop initialization on critical failure
+    } catch (cloudError) {
+        console.error("initializeApp: Failed to initialize cloud services:", cloudError);
+        // Inform the user that sync is unavailable, but the app is still usable.
+        if (syncStatusSpan) syncStatusSpan.textContent = '云同步不可用';
+        if (syncDriveBtn) syncDriveBtn.disabled = true;
+        // Do not show a blocking prompt here unless it's an auth error handled inside.
     }
 
-
-    // 7. 渲染和最终设置
-    renderAllLists();
-    initSortable();
-    console.log("initializeApp: UI 已渲染。");
-
-    if (ledgerDateInput) {
-        ledgerDateInput.valueAsDate = new Date();
-    }
-    switchView('daily-section');
 
      if ('serviceWorker' in navigator && 'PeriodicSyncManager' in window) {
         try {
