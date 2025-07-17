@@ -403,201 +403,238 @@ async function generateCodeChallenge(verifier) {
         .replace(/=/g, '');
 }
 
-// Google Drive Sync Module
 const driveSync = {
     CLIENT_ID: '325408458040-bp083eplhebaj5eoe2m9go2rdiir9l6c.apps.googleusercontent.com',
     API_KEY: 'AIzaSyAHn27YYXEIwQuLRWi1lh2A48ffmr_wKcQ',
     SCOPES: 'https://www.googleapis.com/auth/drive.file',
     DISCOVERY_DOCS: ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"],
     DRIVE_FILE_NAME: 'efficienTodoData.json',
-    tokenClient: null,
     driveFileId: null,
-    gapi: null, // 将在此模块外部由 loadGoogleApis 函数设置
-    gisOAuth2: null, // 将在此模块外部由 loadGoogleApis 函数设置
 
-   // 【CORRECTED】
-// (在 driveSync 对象内部)
-initClients: async function() {
-    console.log("driveSync.initClients: 开始初始化客户端。");
-    return new Promise((resolve, reject) => {
-        // 检查 gapi 和 gis 是否已由 loadGoogleApis 设置
-        if (!driveSync.gapi) {
-            return reject(new Error("driveSync.initClients: driveSync.gapi 未定义。"));
-        }
-        if (!driveSync.gis) { // 使用统一的 'gis' 属性名
-            return reject(new Error("driveSync.initClients: driveSync.gis (google.accounts.oauth2) 未定义。"));
-        }
+    // 【重要】确保这个URL是正确的
+    PROXY_URL: 'https://google-auth-proxy.martinlinzhiwu.workers.dev',
 
-        driveSync.gapi.load('client', async () => {
-            try {
-                await driveSync.gapi.client.init({
-                    apiKey: driveSync.API_KEY,
-                    discoveryDocs: driveSync.DISCOVERY_DOCS,
-                });
-                console.log("driveSync.initClients: gapi.client.init 成功。");
+    authenticate: async function() {
+        console.log("driveSync.authenticate: Starting Authorization Code Flow with PKCE.");
+        const codeVerifier = generateCodeVerifier(128);
+        await db.set('google_code_verifier', codeVerifier);
+        const codeChallenge = await generateCodeChallenge(codeVerifier);
 
-                // 使用 driveSync.gis 初始化 token 客户端
-                driveSync.tokenClient = driveSync.gis.initTokenClient({
+        const authUrl = new URL('https://accounts.google.com/o/oauth2/v2/auth');
+        authUrl.searchParams.append('client_id', driveSync.CLIENT_ID);
+        authUrl.searchParams.append('redirect_uri', window.location.origin + window.location.pathname);
+        authUrl.searchParams.append('response_type', 'code');
+        authUrl.searchParams.append('scope', driveSync.SCOPES);
+        authUrl.searchParams.append('code_challenge_method', 'S256');
+        authUrl.searchParams.append('code_challenge', codeChallenge);
+        authUrl.searchParams.append('access_type', 'offline');
+        authUrl.searchParams.append('prompt', 'consent');
+
+        window.location.href = authUrl.toString();
+    },
+
+    getValidAccessToken: async function() {
+        const expiresAt = await db.get('google_token_expires_at');
+        let accessToken = await db.get('google_access_token');
+
+        if (!accessToken || !expiresAt || Date.now() >= expiresAt) {
+            console.log("driveSync: Access token expired or missing. Refreshing...");
+            const refreshToken = await db.get('google_refresh_token');
+            if (!refreshToken) {
+                console.error("driveSync: No refresh token. Re-authentication required.");
+                await db.set('google_access_token', null);
+                await db.set('google_token_expires_at', null);
+                throw new Error("REAUTH_REQUIRED");
+            }
+
+            const response = await fetch(`${driveSync.PROXY_URL}/refresh-token`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    refresh_token: refreshToken,
                     client_id: driveSync.CLIENT_ID,
-                    scope: driveSync.SCOPES,
-                    callback: '', // 回调在 authenticate 方法中按需设置
+                }),
+            });
+
+            const tokenData = await response.json();
+            if (!response.ok || tokenData.error) {
+                console.error("driveSync: Failed to refresh token.", tokenData.error_description);
+                if (tokenData.error === 'invalid_grant') {
+                     await db.set('google_refresh_token', null);
+                     await db.set('google_access_token', null);
+                     await db.set('google_token_expires_at', null);
+                     throw new Error("REAUTH_REQUIRED");
+                }
+                throw new Error(tokenData.error_description || "Failed to refresh token.");
+            }
+
+            accessToken = tokenData.access_token;
+            await db.set('google_access_token', accessToken);
+            const expiresInMs = (tokenData.expires_in - 60) * 1000;
+            await db.set('google_token_expires_at', Date.now() + expiresInMs);
+            console.log("driveSync: Access token refreshed successfully.");
+        }
+        return accessToken;
+    },
+
+    gapiClientRequest: async function(requestConfig) {
+        try {
+            const accessToken = await driveSync.getValidAccessToken();
+            if (!window.gapi || !window.gapi.client) {
+                 throw new Error("GAPI client is not initialized.");
+            }
+            window.gapi.client.setToken({ access_token: accessToken });
+            return await window.gapi.client.request(requestConfig);
+        } catch (error) {
+            if (error.message === 'REAUTH_REQUIRED') {
+                openCustomPrompt({
+                    title: '需要重新授权',
+                    message: '您的Google Drive访问权限已过期或被撤销，请重新授权以继续使用云同步功能。',
+                    confirmText: '去授权',
+                    onConfirm: () => { driveSync.authenticate(); }
                 });
-
-                if (driveSync.tokenClient) {
-                    console.log("driveSync.initClients: Google API 客户端 (gapi 和 gis) 初始化成功。");
-                    resolve();
-                } else {
-                    reject(new Error("driveSync.initClients: GIS Token Client 初始化失败，返回了 null 或 undefined。"));
-                }
-                
-            } catch (initError) {
-                console.error("driveSync.initClients: 初始化过程中出错:", initError);
-                reject(initError);
             }
-        });
-    });
-},
-  // 【CORRECTED & ROBUST AUTHENTICATION】
-// (在 app.js 的 driveSync 对象中)
-
-authenticate: function() { // 【注意】这里不再需要 async，因为它返回一个 Promise
-    console.log("driveSync.authenticate: Method invoked.");
-    return new Promise((resolve, reject) => {
-        if (!driveSync.tokenClient) {
-             const errMsg = "driveSync.authenticate: GIS Token Client not initialized.";
-             console.error(errMsg);
-             return reject(new Error(errMsg));
+            throw error;
         }
+    },
 
-        // 设置回调函数，用于处理来自GIS库的响应
-        driveSync.tokenClient.callback = (resp) => {
-            // 移除回调，避免下次调用时意外触发
-            driveSync.tokenClient.callback = null; 
-            
-            if (resp.error !== undefined) {
-                console.error('driveSync.authenticate: Google Auth Error in callback:', resp);
-                // 如果是用户关闭弹窗，或者静默请求失败需要弹窗但被阻止，
-                // 这些错误通常意味着需要用户交互，但流程已中断。
-                // 我们可以统一返回一个清晰的错误信息。
-                let errorMessage = `授权失败: ${resp.error}`;
-                if (resp.error === "popup_closed_by_user" || resp.error === "access_denied") {
-                    errorMessage = "用户取消了授权。";
-                } else if (resp.error === "popup_failed_to_open") {
-                     errorMessage = "无法打开授权窗口，请检查浏览器是否阻止了弹出窗口。";
-                }
-                reject(new Error(errorMessage));
-            } else {
-                console.log("driveSync.authenticate: GSI token acquired successfully.");
-                // 令牌已经由GIS库自动设置给GAPI，我们只需resolve表示成功即可
-                resolve({ success: true });
+    findOrCreateFile: async function() {
+        console.log("driveSync.findOrCreateFile: Searching for file.");
+        const response = await driveSync.gapiClientRequest({
+            path: 'https://www.googleapis.com/drive/v3/files',
+            params: {
+                q: `name='${driveSync.DRIVE_FILE_NAME}' and trashed = false`,
+                spaces: 'drive',
+                fields: 'files(id, name, modifiedTime)'
             }
-        };
-        
-        // 【核心修正】不再自行判断 prompt 类型。
-        // 直接调用 requestAccessToken，让GIS库自己去决定是否需要弹出窗口。
-        // GIS的默认行为是：如果可能，就静默获取；如果必须，才弹出窗口。这正是我们想要的！
-        console.log("driveSync.authenticate: Requesting access token. Let GIS handle the prompt.");
-        driveSync.tokenClient.requestAccessToken(); 
-    });
-},
-  
-// 【CORRECTED】
-// (在 app.js 的 driveSync 对象中)
-findOrCreateFile: async function() {
-    console.log("driveSync.findOrCreateFile: Searching in 'drive' space (user-visible area).");
-    if (!driveSync.gapi || !driveSync.gapi.client || !driveSync.gapi.client.drive) {
-        throw new Error("driveSync.findOrCreateFile: Google Drive API client not ready.");
-    }
-
-    // --- 核心修改：在正确的地方查找文件 ---
-    const response = await driveSync.gapi.client.drive.files.list({
-        // 查询条件：文件名匹配，并且文件没有被放入回收站
-        q: `name='${driveSync.DRIVE_FILE_NAME}' and trashed = false`, 
-        // 搜索空间：用户可见的 Google Drive
-        spaces: 'drive', 
-        // 需要返回的字段
-        fields: 'files(id, name)'
-    });
-
-    if (response.result.files && response.result.files.length > 0) {
-        // 找到了文件
-        driveSync.driveFileId = response.result.files[0].id;
-        console.log("driveSync.findOrCreateFile: Found existing file in 'drive' space:", driveSync.driveFileId);
-        return driveSync.driveFileId;
-    } else {
-        // 没找到，就创建一个新的
-        console.log("driveSync.findOrCreateFile: File not found in 'drive' space, creating a new one.");
-        
-        // --- 核心修改：在正确的地方创建文件 ---
-        const createResponse = await driveSync.gapi.client.drive.files.create({
-            // 资源信息：只指定文件名，默认会创建在根目录
-            resource: { name: driveSync.DRIVE_FILE_NAME }, 
-            // 需要返回的字段
-            fields: 'id'
         });
-        driveSync.driveFileId = createResponse.result.id;
-        console.log("driveSync.findOrCreateFile: Created new file in 'drive' space:", driveSync.driveFileId);
-        return driveSync.driveFileId;
-    }
-},
+
+        if (response.result.files && response.result.files.length > 0) {
+            driveSync.driveFileId = response.result.files[0].id;
+            console.log("driveSync.findOrCreateFile: Found file:", driveSync.driveFileId);
+            return response.result.files[0];
+        } else {
+            console.log("driveSync.findOrCreateFile: File not found, creating a new one.");
+            const createResponse = await driveSync.gapiClientRequest({
+                path: 'https://www.googleapis.com/drive/v3/files',
+                method: 'POST',
+                body: { name: driveSync.DRIVE_FILE_NAME, parents: ['root'] },
+                fields: 'id, modifiedTime'
+            });
+            driveSync.driveFileId = createResponse.result.id;
+            console.log("driveSync.findOrCreateFile: Created new file:", driveSync.driveFileId);
+            return createResponse.result;
+        }
+    },
+
     upload: async function(data) {
-        console.log("driveSync.upload: Method invoked.");
-        if (!driveSync.driveFileId) throw new Error("driveSync.upload: No Drive file ID.");
-        if (!driveSync.gapi || !driveSync.gapi.client) { // 检查模块内的 gapi.client
-            throw new Error("driveSync.upload: Google API client (driveSync.gapi.client) not ready.");
-        }
-
+        if (!driveSync.driveFileId) throw new Error("No Drive file ID for upload.");
         const boundary = '-------314159265358979323846';
         const delimiter = "\r\n--" + boundary + "\r\n";
         const close_delim = "\r\n--" + boundary + "--";
-        const metadata = { 'mimeType': 'application/json' };
         const multipartRequestBody =
-            delimiter + 'Content-Type: application/json; charset=UTF-8\r\n\r\n' + JSON.stringify(metadata) +
+            delimiter + 'Content-Type: application/json; charset=UTF-8\r\n\r\n' + JSON.stringify({ mimeType: 'application/json' }) +
             delimiter + 'Content-Type: application/json\r\n\r\n' + JSON.stringify(data) + close_delim;
-        
-        console.log("driveSync.upload: Attempting to upload data to file ID:", driveSync.driveFileId);
-        // 使用 driveSync.gapi.client.request
-        await driveSync.gapi.client.request({
-            'path': `/upload/drive/v3/files/${driveSync.driveFileId}`,
-            'method': 'PATCH',
-            'params': { 'uploadType': 'multipart' },
-            'headers': { 'Content-Type': 'multipart/related; boundary="' + boundary + '"' },
-            'body': multipartRequestBody
+
+        await driveSync.gapiClientRequest({
+            path: `/upload/drive/v3/files/${driveSync.driveFileId}`,
+            method: 'PATCH',
+            params: { uploadType: 'multipart' },
+            headers: { 'Content-Type': 'multipart/related; boundary="' + boundary + '"' },
+            body: multipartRequestBody
         });
         console.log("driveSync.upload: Upload successful.");
-        return { success: true, message: "已同步到云端" }; // 修改提示信息
+        return { success: true, message: "已同步到云端" };
     },
 
     download: async function() {
-        console.log("driveSync.download: Method invoked.");
-        if (!driveSync.driveFileId) {
-            console.warn("driveSync.download: No Drive file ID for download.");
-            // 考虑返回 null 或一个空对象结构，而不是抛出错误，以便同步逻辑可以处理新文件的情况
-            return null; 
-        }
-        if (!driveSync.gapi || !driveSync.gapi.client || !driveSync.gapi.client.drive) {
-            throw new Error("driveSync.download: Google Drive API client (driveSync.gapi.client.drive) not ready.");
-        }
-        console.log("driveSync.download: Attempting to download from file ID:", driveSync.driveFileId);
-        // 使用 driveSync.gapi.client.drive.files.get
-        const response = await driveSync.gapi.client.drive.files.get({
-            fileId: driveSync.driveFileId,
-            alt: 'media'
+        if (!driveSync.driveFileId) return null;
+        const response = await driveSync.gapiClientRequest({
+            path: `https://www.googleapis.com/drive/v3/files/${driveSync.driveFileId}`,
+            params: { alt: 'media' }
         });
         if (response.body && response.body.length > 0) {
-            try {
-                const parsedData = JSON.parse(response.body);
-                console.log("driveSync.download: Download and parse successful.");
-                return parsedData;
-            } catch (e) {
-                console.error("driveSync.download: Failed to parse downloaded JSON from Drive:", e, "Body:", response.body);
-                throw new Error("云端数据已损坏或非有效JSON。");
-            }
+            return JSON.parse(response.body);
         }
-        console.log("driveSync.download: Downloaded empty or no data from Drive.");
-        return null; // 如果文件为空或未找到内容，返回null
+        return null;
     }
 };
+
+// ========================================================================
+// Auth Callback Handler
+// ========================================================================
+
+async function handleGoogleAuthCallback() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const authCode = urlParams.get('code');
+
+    if (!authCode) {
+        return; // URL中没有授权码，正常启动
+    }
+    
+    // 清理地址栏
+    window.history.replaceState({}, document.title, window.location.pathname);
+
+    openCustomPrompt({
+        title: "正在完成Google Drive授权...",
+        message: "请稍候...",
+        inputType: 'none',
+        hideConfirmButton: true,
+        hideCancelButton: true
+    });
+
+    try {
+        const codeVerifier = await db.get('google_code_verifier');
+        if (!codeVerifier) {
+            throw new Error("本地验证信息 (Code Verifier) 已丢失，请重新授权。");
+        }
+
+        const response = await fetch(`${driveSync.PROXY_URL}/exchange-token`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                code: authCode,
+                code_verifier: codeVerifier,
+                client_id: driveSync.CLIENT_ID,
+                redirect_uri: window.location.origin + window.location.pathname,
+            }),
+        });
+
+        const tokenData = await response.json();
+
+        if (!response.ok || tokenData.error) {
+            throw new Error(tokenData.error_description || "从代理服务器获取Token失败。");
+        }
+
+        await db.set('google_access_token', tokenData.access_token);
+        if (tokenData.refresh_token) {
+            await db.set('google_refresh_token', tokenData.refresh_token);
+        }
+        const expiresInMs = (tokenData.expires_in - 60) * 1000;
+        await db.set('google_token_expires_at', Date.now() + expiresInMs);
+        await db.set('isFirstSyncCompleted', true);
+
+        closeCustomPrompt();
+
+        setTimeout(() => {
+            if (syncDriveBtn && !syncDriveBtn.disabled) {
+                console.log("授权回调成功，自动触发首次同步。");
+                syncDriveBtn.click();
+            }
+        }, 500);
+
+    } catch (error) {
+        closeCustomPrompt();
+        openCustomPrompt({
+            title: "授权失败",
+            message: `与Google的授权连接失败：${error.message}`,
+            confirmText: "好的",
+            hideCancelButton: true,
+        });
+    }
+}
+
+
 
 // ========================================================================
 // 2. 状态变量和常量定义
@@ -844,49 +881,28 @@ async function syncWithCloudOnStartup() {
 
 async function loadGoogleApis() {
     return new Promise((resolve, reject) => {
-        const checkInterval = setInterval(() => {
-            // 检查 GAPI 和新的 GIS 库是否都已加载
-            if (window.gapi && window.google && window.google.accounts && window.google.accounts.oauth2) {
-                clearInterval(checkInterval);
-                console.log("loadGoogleApis: GAPI 和 GIS 库已加载。");
+        const checkGapi = setInterval(() => {
+            // 我们只需要 gapi.client
+            if (window.gapi && window.gapi.client) {
+                clearInterval(checkGapi);
+                console.log("loadGoogleApis: GAPI client library loaded.");
                 
-                // 统一将 gapi 和 gis 实例设置到 driveSync 模块上
-                driveSync.gapi = window.gapi;
-                driveSync.gis = window.google.accounts.oauth2; // 使用 'gis' 作为统一的属性名
-                
-                // 现在可以安全地初始化 driveSync 的内部客户端了
-                driveSync.initClients()
-                    .then(() => {
-                        console.log("loadGoogleApis: driveSync 客户端初始化成功。");
-                        resolve(); // 表示API已完全准备好
-                    })
-                    .catch(error => {
-                        console.error("loadGoogleApis: 初始化 driveSync 客户端失败:", error);
-                        if (typeof syncStatusSpan !== 'undefined' && syncStatusSpan) {
-                             syncStatusSpan.textContent = 'Google服务初始化失败。';
-                        }
-                        reject(error);
-                    });
+                // 初始化 GAPI 客户端
+                window.gapi.client.init({
+                    apiKey: driveSync.API_KEY,
+                    discoveryDocs: driveSync.DISCOVERY_DOCS,
+                }).then(resolve, reject);
             }
-        }, 200);
+        }, 100);
 
-        // 设置一个超时，以防脚本永远不加载
         setTimeout(() => {
-            // 检查 driveSync 模块内的引用是否已设置
-            if (!driveSync.gapi || !driveSync.gis) { 
-                clearInterval(checkInterval);
-                const errorMsg = "loadGoogleApis: 加载 Google API 脚本超时。";
-                console.error(errorMsg);
-                if (typeof syncStatusSpan !== 'undefined' && syncStatusSpan) {
-                     syncStatusSpan.textContent = '加载Google服务超时。';
-                }
-                reject(new Error(errorMsg));
+            if (!window.gapi || !window.gapi.client) {
+                clearInterval(checkGapi);
+                reject(new Error("Loading Google API client timed out."));
             }
         }, 15000); // 15秒超时
     });
 }
-
-
 function updateSyncIndicator() {
     if (!syncDriveBtn || !syncStatusSpan) return;
 
@@ -5794,6 +5810,7 @@ async function requestBackupCheck() {
 
 async function initializeApp() {
     console.log("initializeApp: 开始应用初始化。");
+    await handleGoogleAuthCallback();
 
     // AI Assistant & Report Generator Elements
     aiAssistantBtn = document.getElementById('ai-assistant-btn');
