@@ -800,28 +800,64 @@ async function syncWithCloudOnStartup() {
         const cloudModifiedTime = new Date(fileMeta.modifiedTime).getTime();
         const localLastUpdate = allTasks.lastUpdatedLocal || 0;
 
-        // If cloud data is significantly newer than local data
-        if (cloudModifiedTime > (localLastUpdate + 1000)) { // Add 1s buffer
-            console.log("Startup sync: Cloud data is newer. Downloading...");
-            if (syncStatusSpan) syncStatusSpan.textContent = '正在从云端更新...';
-
-            const cloudData = await driveSync.download();
-            if (cloudData && typeof cloudData === 'object' && Object.keys(cloudData).length > 0) {
+         // --- 智能同步逻辑 ---
+        if (cloudData && typeof cloudData === 'object' && Object.keys(cloudData).length > 0) {
+            
+            // 情况一：云端数据是今天的，说明其他设备已更新，直接覆盖本地
+            if (cloudData.lastDailyResetDate === todayString) {
+                console.log("启动时同步：云端数据已是最新，将覆盖本地。");
                 allTasks = cloudData;
                 await db.set('allTasks', allTasks);
                 renderAllLists();
-                console.log("Startup sync: Local data updated from cloud.");
-                if (syncStatusSpan) syncStatusSpan.textContent = '已从云端更新';
+                if (syncStatusSpan) syncStatusSpan.textContent = '已从云端更新！';
+
+            // 情况二：云端数据是昨天的（或更早），说明本设备是今天第一个启动的
+            } else {
+                console.log("启动时同步：本设备为今日首次启动，将重置云端数据并同步。");
+                if (syncStatusSpan) syncStatusSpan.textContent = '为新的一天准备数据...';
+
+                // 1. 以云端数据为基础
+                let dataToReset = cloudData;
+                
+                // 2. 对其应用每日清理逻辑
+                // 这里我们直接复用 cleanupDailyTasks 的核心逻辑
+                if (dataToReset.daily && dataToReset.daily.length > 0) {
+                    const tasksToKeep = [];
+                    dataToReset.daily.forEach(task => {
+                        if (task.fromFuture) return; // 移除过期的计划任务
+                        if (task.cycle === 'once' && task.creationDate !== todayString) return; // 移除过期的单次任务
+                        
+                        // 重置重复任务的状态
+                        if (task.completed) task.completed = false;
+                        tasksToKeep.push(task);
+                    });
+                    dataToReset.daily = tasksToKeep;
+                }
+                dataToReset.lastDailyResetDate = todayString; // 更新日期戳
+                
+                // 3. 将这份处理好的“今日新数据”作为权威数据
+                allTasks = dataToReset;
+                await db.set('allTasks', allTasks); // 保存到本地
+                renderAllLists(); // 刷新UI
+
+                // 4. 【关键】将这份新数据立即上传回云端
+                console.log("启动时同步：将重置后的今日数据上传回云端。");
+                await driveSync.upload(allTasks);
+                if (syncStatusSpan) syncStatusSpan.textContent = '新的一天，数据已同步！';
             }
+
         } else {
-            console.log("Startup sync: Local data is up-to-date or newer. No download needed.");
+            // 云端无数据或为空，说明是全新安装，本地数据（已在 `runAutomaticUpkeepTasks` 中重置）将成为权威版本
+            console.log("启动时同步：云端无数据，将上传本地数据。");
+            await driveSync.upload(allTasks);
+            if (syncStatusSpan) syncStatusSpan.textContent = '已初始化云端数据！';
         }
 
-        isDataDirty = false; // Sync check is complete, data is considered clean
+        isDataDirty = false;
         updateSyncIndicator();
 
     } catch (error) {
-        console.error("Startup sync failed:", error);
+        console.error("启动时自动同步失败:", error);
         if (error.message !== 'REAUTH_REQUIRED') {
             if (syncStatusSpan) syncStatusSpan.textContent = '启动同步失败';
         }
