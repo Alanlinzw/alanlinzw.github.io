@@ -5908,36 +5908,31 @@ if (!statsModal) {
     await handleNotionCallback(); 
     // 4. 加载 Google API
   try {
+        // 1. Handle potential OAuth2 callback from Google redirect
+        await handleGoogleAuthCallback();
+
+        // 2. Load Google API libraries
         await loadGoogleApis();
-    } catch (error) {
-        console.error("initializeApp: 启动时加载 Google API 失败:", error);
-        if (syncStatusSpan) syncStatusSpan.textContent = 'Google 服务加载失败。';
-    }
 
-   // --- 【核心逻辑修改】 ---
-    try {
-        // 1. 先从本地DB加载数据，让应用能快速响应并避免白屏
+        // 3. Load local data from IndexedDB so the user sees their content ASAP
         await loadTasks();
-        console.log("initializeApp: 本地数据已加载。");
+        renderAllLists();
+        initSortable();
+        console.log("initializeApp: Local data loaded and rendered.");
 
-        // 2. 【关键】在进行任何网络同步之前，先对本地加载的数据执行每日维护任务。
-        // 这会重置每日任务等，为新的一天做准备。
-        // runAutomaticUpkeepTasks 函数内部会处理数据变更、保存和必要的UI重绘。
-        console.log("initializeApp: 在云同步前执行本地每日维护...");
+        // 4. In the background, perform daily maintenance on the loaded data
         await runAutomaticUpkeepTasks();
-
-        // 3. 现在，执行启动时云同步。
-        // 它会从云端拉取权威数据，并覆盖本地数据。
-        // 这是正确的行为，因为如果其他设备在今天已经更新了任务，云端数据会是最新的。
-        console.log("initializeApp: 开始执行启动时云同步...");
+        
+        // 5. Finally, check against the cloud for any newer versions
         await syncWithCloudOnStartup();
 
     } catch (e) {
-        console.error("initializeApp: 初始数据加载或处理时发生严重错误:", e);
-        openCustomPrompt({ title: "加载数据失败", message: `无法加载或处理您的数据：${e.message}`, inputType: 'none', confirmText: '好的', hideCancelButton: true });
-        return; // 如果数据加载失败，终止初始化
+        console.error("initializeApp: A critical error occurred during initialization:", e);
+        if (!String(e.message).includes("Google API")) { // Avoid redundant alerts
+             openCustomPrompt({ title: "应用启动失败", message: e.message, inputType: 'none', confirmText: '好的', hideCancelButton: true });
+        }
+        return; // Stop initialization on critical failure
     }
-    // --- 【核心逻辑修改结束】 ---
 
 
     // 7. 渲染和最终设置
