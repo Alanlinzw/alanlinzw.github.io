@@ -403,6 +403,10 @@ async function generateCodeChallenge(verifier) {
         .replace(/=/g, '');
 }
 
+// ========================================================================
+// 修正后的 Google Drive 同步模块
+// ========================================================================
+
 const driveSync = {
     CLIENT_ID: '325408458040-bp083eplhebaj5eoe2m9go2rdiir9l6c.apps.googleusercontent.com',
     API_KEY: 'AIzaSyAHn27YYXEIwQuLRWi1lh2A48ffmr_wKcQ',
@@ -411,11 +415,12 @@ const driveSync = {
     DRIVE_FILE_NAME: 'efficienTodoData.json',
     driveFileId: null,
 
-    // 【重要】确保这个URL是正确的
+    // 【重要】请确保这个URL是你自己的Cloudflare Worker地址
     PROXY_URL: 'https://google-auth-proxy.martinlinzhiwu.workers.dev',
 
+    // 【新】授权函数：引导用户去Google授权
     authenticate: async function() {
-        console.log("driveSync.authenticate: Starting Authorization Code Flow with PKCE.");
+        console.log("driveSync.authenticate: 启动授权码流程 (PKCE)。");
         const codeVerifier = generateCodeVerifier(128);
         await db.set('google_code_verifier', codeVerifier);
         const codeChallenge = await generateCodeChallenge(codeVerifier);
@@ -427,26 +432,28 @@ const driveSync = {
         authUrl.searchParams.append('scope', driveSync.SCOPES);
         authUrl.searchParams.append('code_challenge_method', 'S256');
         authUrl.searchParams.append('code_challenge', codeChallenge);
-        authUrl.searchParams.append('access_type', 'offline');
-        authUrl.searchParams.append('prompt', 'consent');
+        authUrl.searchParams.append('access_type', 'offline'); // 请求刷新令牌
+        authUrl.searchParams.append('prompt', 'consent'); // 确保用户看到授权界面
 
         window.location.href = authUrl.toString();
     },
 
+    // 【新】获取有效的访问令牌，并在需要时静默刷新
     getValidAccessToken: async function() {
         const expiresAt = await db.get('google_token_expires_at');
         let accessToken = await db.get('google_access_token');
 
         if (!accessToken || !expiresAt || Date.now() >= expiresAt) {
-            console.log("driveSync: Access token expired or missing. Refreshing...");
+            console.log("driveSync: 访问令牌已过期或不存在，正在刷新...");
             const refreshToken = await db.get('google_refresh_token');
             if (!refreshToken) {
-                console.error("driveSync: No refresh token. Re-authentication required.");
+                console.error("driveSync: 找不到刷新令牌，需要用户重新授权。");
                 await db.set('google_access_token', null);
                 await db.set('google_token_expires_at', null);
-                throw new Error("REAUTH_REQUIRED");
+                throw new Error("REAUTH_REQUIRED"); // 抛出特定错误，由上层处理
             }
 
+            // 通过我们的代理服务来刷新令牌
             const response = await fetch(`${driveSync.PROXY_URL}/refresh-token`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -458,48 +465,53 @@ const driveSync = {
 
             const tokenData = await response.json();
             if (!response.ok || tokenData.error) {
-                console.error("driveSync: Failed to refresh token.", tokenData.error_description);
+                console.error("driveSync: 刷新令牌失败。", tokenData.error_description);
                 if (tokenData.error === 'invalid_grant') {
                      await db.set('google_refresh_token', null);
                      await db.set('google_access_token', null);
                      await db.set('google_token_expires_at', null);
                      throw new Error("REAUTH_REQUIRED");
                 }
-                throw new Error(tokenData.error_description || "Failed to refresh token.");
+                throw new Error(tokenData.error_description || "刷新令牌时发生未知错误。");
             }
 
             accessToken = tokenData.access_token;
             await db.set('google_access_token', accessToken);
-            const expiresInMs = (tokenData.expires_in - 60) * 1000;
+            const expiresInMs = (tokenData.expires_in - 60) * 1000; // 预留60秒缓冲
             await db.set('google_token_expires_at', Date.now() + expiresInMs);
-            console.log("driveSync: Access token refreshed successfully.");
+            console.log("driveSync: 访问令牌刷新成功。");
         }
         return accessToken;
     },
 
+    // 【新】包装所有GAPI请求，自动处理认证
     gapiClientRequest: async function(requestConfig) {
         try {
             const accessToken = await driveSync.getValidAccessToken();
+            // 确保GAPI客户端已初始化
             if (!window.gapi || !window.gapi.client) {
-                 throw new Error("GAPI client is not initialized.");
+                 throw new Error("GAPI客户端尚未初始化。");
             }
             window.gapi.client.setToken({ access_token: accessToken });
             return await window.gapi.client.request(requestConfig);
         } catch (error) {
             if (error.message === 'REAUTH_REQUIRED') {
+                // 如果需要重新授权，弹窗提示用户
                 openCustomPrompt({
                     title: '需要重新授权',
-                    message: '您的Google Drive访问权限已过期或被撤销，请重新授权以继续使用云同步功能。',
+                    message: '您对Google Drive的访问权限已过期或被撤销，请重新授权以继续使用云同步功能。',
                     confirmText: '去授权',
                     onConfirm: () => { driveSync.authenticate(); }
                 });
             }
+            // 抛出错误，让调用者知道请求失败了
             throw error;
         }
     },
 
+    // 【核心修正】所有文件操作函数现在都使用 gapiClientRequest 包装器
     findOrCreateFile: async function() {
-        console.log("driveSync.findOrCreateFile: Searching for file.");
+        console.log("driveSync: 正在查找或创建云端文件...");
         const response = await driveSync.gapiClientRequest({
             path: 'https://www.googleapis.com/drive/v3/files',
             params: {
@@ -511,10 +523,10 @@ const driveSync = {
 
         if (response.result.files && response.result.files.length > 0) {
             driveSync.driveFileId = response.result.files[0].id;
-            console.log("driveSync.findOrCreateFile: Found file:", driveSync.driveFileId);
+            console.log("driveSync: 已找到文件:", driveSync.driveFileId);
             return response.result.files[0];
         } else {
-            console.log("driveSync.findOrCreateFile: File not found, creating a new one.");
+            console.log("driveSync: 未找到文件，正在创建新文件...");
             const createResponse = await driveSync.gapiClientRequest({
                 path: 'https://www.googleapis.com/drive/v3/files',
                 method: 'POST',
@@ -522,13 +534,13 @@ const driveSync = {
                 fields: 'id, modifiedTime'
             });
             driveSync.driveFileId = createResponse.result.id;
-            console.log("driveSync.findOrCreateFile: Created new file:", driveSync.driveFileId);
+            console.log("driveSync: 已创建新文件:", driveSync.driveFileId);
             return createResponse.result;
         }
     },
 
     upload: async function(data) {
-        if (!driveSync.driveFileId) throw new Error("No Drive file ID for upload.");
+        if (!driveSync.driveFileId) throw new Error("没有文件ID，无法上传。");
         const boundary = '-------314159265358979323846';
         const delimiter = "\r\n--" + boundary + "\r\n";
         const close_delim = "\r\n--" + boundary + "--";
@@ -543,7 +555,7 @@ const driveSync = {
             headers: { 'Content-Type': 'multipart/related; boundary="' + boundary + '"' },
             body: multipartRequestBody
         });
-        console.log("driveSync.upload: Upload successful.");
+        console.log("driveSync: 上传成功。");
         return { success: true, message: "已同步到云端" };
     },
 
@@ -572,7 +584,7 @@ async function handleGoogleAuthCallback() {
         return; // URL中没有授权码，正常启动
     }
     
-    // 清理地址栏
+    // 清理地址栏，对用户隐藏授权码
     window.history.replaceState({}, document.title, window.location.pathname);
 
     openCustomPrompt({
@@ -586,7 +598,7 @@ async function handleGoogleAuthCallback() {
     try {
         const codeVerifier = await db.get('google_code_verifier');
         if (!codeVerifier) {
-            throw new Error("本地验证信息 (Code Verifier) 已丢失，请重新授权。");
+            throw new Error("本地验证信息已丢失，请重新授权。");
         }
 
         const response = await fetch(`${driveSync.PROXY_URL}/exchange-token`, {
@@ -612,13 +624,14 @@ async function handleGoogleAuthCallback() {
         }
         const expiresInMs = (tokenData.expires_in - 60) * 1000;
         await db.set('google_token_expires_at', Date.now() + expiresInMs);
-        await db.set('isFirstSyncCompleted', true);
+        await db.set('isFirstSyncCompleted', true); // 授权成功后，标记为已完成首次同步设置
 
         closeCustomPrompt();
 
+        // 延迟触发同步，给UI一点响应时间
         setTimeout(() => {
             if (syncDriveBtn && !syncDriveBtn.disabled) {
-                console.log("授权回调成功，自动触发首次同步。");
+                console.log("授权回调成功，自动触发同步。");
                 syncDriveBtn.click();
             }
         }, 500);
@@ -633,8 +646,6 @@ async function handleGoogleAuthCallback() {
         });
     }
 }
-
-
 
 // ========================================================================
 // 2. 状态变量和常量定义
@@ -773,109 +784,53 @@ let statsBtn, statsModal, statsModalCloseBtn, faqBtn, faqModal, faqModalCloseBtn
 // (保持你现有的这部分代码不变，直到 bindEventListeners)
 // ========================================================================
 async function syncWithCloudOnStartup() {
-    // 检查同步按钮，如果它被禁用了（意味着可能正在手动同步），则跳过启动时同步
-    if (!syncDriveBtn || syncDriveBtn.disabled) {
-        console.log("启动时同步已跳过：手动同步可能正在进行中。");
-        return;
-    }
-
-    console.log("启动时同步开始：智能检查云端数据。");
-    syncDriveBtn.disabled = true;
-    if (syncStatusSpan) syncStatusSpan.textContent = '正在从云端检查更新...';
+    if (syncDriveBtn.disabled) return; // Don't run if another sync is in progress
+    
+    console.log("Startup sync: Checking cloud for newer data.");
+    if (syncStatusSpan) syncStatusSpan.textContent = '检查云端...';
 
     try {
-        // --- 认证与文件查找 (保持不变) ---
-        if (!driveSync.tokenClient) await loadGoogleApis();
-        const token = driveSync.gapi.client.getToken();
-        if (token === null) await driveSync.authenticate();
-        await driveSync.findOrCreateFile();
-        if (!driveSync.driveFileId) {
-             console.warn('启动时同步中止：未找到云端文件ID，可能需要用户手动发起首次同步。');
-             if (syncStatusSpan) syncStatusSpan.textContent = '请手动同步以关联云端';
-             syncDriveBtn.disabled = false;
+        // findOrCreateFile will handle auth and return file metadata
+        const fileMeta = await driveSync.findOrCreateFile();
+        if (!fileMeta || !fileMeta.modifiedTime) {
+             console.log("Startup sync: No cloud file found or no modification time. Skipping download check.");
              return;
         }
 
-        // --- 下载云端数据 ---
-        const cloudData = await driveSync.download();
-        const todayString = getTodayString();
+        const cloudModifiedTime = new Date(fileMeta.modifiedTime).getTime();
+        const localLastUpdate = allTasks.lastUpdatedLocal || 0;
 
-        // --- 智能同步逻辑 ---
-        if (cloudData && typeof cloudData === 'object' && Object.keys(cloudData).length > 0) {
-            
-            // 情况一：云端数据是今天的，说明其他设备已更新，直接覆盖本地
-            if (cloudData.lastDailyResetDate === todayString) {
-                console.log("启动时同步：云端数据已是最新，将覆盖本地。");
+        // If cloud data is significantly newer than local data
+        if (cloudModifiedTime > (localLastUpdate + 1000)) { // Add 1s buffer
+            console.log("Startup sync: Cloud data is newer. Downloading...");
+            if (syncStatusSpan) syncStatusSpan.textContent = '正在从云端更新...';
+
+            const cloudData = await driveSync.download();
+            if (cloudData && typeof cloudData === 'object' && Object.keys(cloudData).length > 0) {
                 allTasks = cloudData;
                 await db.set('allTasks', allTasks);
                 renderAllLists();
-                if (syncStatusSpan) syncStatusSpan.textContent = '已从云端更新！';
-
-            // 情况二：云端数据是昨天的（或更早），说明本设备是今天第一个启动的
-            } else {
-                console.log("启动时同步：本设备为今日首次启动，将重置云端数据并同步。");
-                if (syncStatusSpan) syncStatusSpan.textContent = '为新的一天准备数据...';
-
-                // 1. 以云端数据为基础
-                let dataToReset = cloudData;
-                
-                // 2. 对其应用每日清理逻辑
-                // 这里我们直接复用 cleanupDailyTasks 的核心逻辑
-                if (dataToReset.daily && dataToReset.daily.length > 0) {
-                    const tasksToKeep = [];
-                    dataToReset.daily.forEach(task => {
-                        if (task.fromFuture) return; // 移除过期的计划任务
-                        if (task.cycle === 'once' && task.creationDate !== todayString) return; // 移除过期的单次任务
-                        
-                        // 重置重复任务的状态
-                        if (task.completed) task.completed = false;
-                        tasksToKeep.push(task);
-                    });
-                    dataToReset.daily = tasksToKeep;
-                }
-                dataToReset.lastDailyResetDate = todayString; // 更新日期戳
-                
-                // 3. 将这份处理好的“今日新数据”作为权威数据
-                allTasks = dataToReset;
-                await db.set('allTasks', allTasks); // 保存到本地
-                renderAllLists(); // 刷新UI
-
-                // 4. 【关键】将这份新数据立即上传回云端
-                console.log("启动时同步：将重置后的今日数据上传回云端。");
-                await driveSync.upload(allTasks);
-                if (syncStatusSpan) syncStatusSpan.textContent = '新的一天，数据已同步！';
+                console.log("Startup sync: Local data updated from cloud.");
+                if (syncStatusSpan) syncStatusSpan.textContent = '已从云端更新';
             }
-
         } else {
-            // 云端无数据或为空，说明是全新安装，本地数据（已在 `runAutomaticUpkeepTasks` 中重置）将成为权威版本
-            console.log("启动时同步：云端无数据，将上传本地数据。");
-            await driveSync.upload(allTasks);
-            if (syncStatusSpan) syncStatusSpan.textContent = '已初始化云端数据！';
+            console.log("Startup sync: Local data is up-to-date or newer. No download needed.");
         }
 
-        isDataDirty = false;
+        isDataDirty = false; // Sync check is complete, data is considered clean
         updateSyncIndicator();
 
     } catch (error) {
-        console.error("启动时自动同步失败:", error);
-        if (syncStatusSpan) {
-            let errorMessage = "未知错误";
-            if (error.message.includes("popup_closed_by_user") || error.message.includes("access_denied")) {
-                errorMessage = "用户取消了授权";
-            } else if (error.message.includes("popup_failed_to_open")) {
-                errorMessage = "授权弹窗被阻止";
-            } else {
-                errorMessage = error.message;
-            }
-            syncStatusSpan.textContent = `启动同步错误: ${errorMessage.substring(0, 30)}...`;
+        console.error("Startup sync failed:", error);
+        if (error.message !== 'REAUTH_REQUIRED') {
+            if (syncStatusSpan) syncStatusSpan.textContent = '启动同步失败';
         }
     } finally {
-        syncDriveBtn.disabled = false;
         setTimeout(() => {
-            if (syncStatusSpan && (syncStatusSpan.textContent.includes('更新') || syncStatusSpan.textContent.includes('同步'))) {
+            if (syncStatusSpan && (syncStatusSpan.textContent.includes('更新') || syncStatusSpan.textContent.includes('失败'))) {
                 syncStatusSpan.textContent = '';
             }
-        }, 7000);
+        }, 5000);
     }
 }
 
