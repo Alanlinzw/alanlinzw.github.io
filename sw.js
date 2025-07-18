@@ -128,7 +128,7 @@ const backupDb = {
 // ========================================================================
 // 1. Service Worker 生命周期事件
 // ========================================================================
-const CACHE_NAME = 'todo-list-cache-v12'; // 【MODIFIED】缓存版本号更新
+const CACHE_NAME = 'todo-list-cache-v13'; // 【MODIFIED】缓存版本号更新
 // 应用外壳通常是相对路径
 const APP_SHELL_URLS = [
   '/', 
