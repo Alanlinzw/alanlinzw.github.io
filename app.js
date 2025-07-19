@@ -1271,6 +1271,10 @@ function toggleTheme() { const newTheme = currentTheme === 'light' ? 'dark' : 'l
 function loadTheme() { const savedTheme = localStorage.getItem('theme') || 'light'; applyTheme(savedTheme); }
 function generateUniqueId() { return `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`; }
 
+f// ========================================================================
+// app.js -> addTask 函数 (修改后，用于调用 Cloudflare Worker)
+// ========================================================================
+
 function addTask(inputElement, taskArrayRefName, onCompleteCallback, options = {}) {
     const { type, tagsInputElement, dateElement } = options;
     const taskText = inputElement.value.trim();
@@ -1279,7 +1283,7 @@ function addTask(inputElement, taskArrayRefName, onCompleteCallback, options = {
     let newTask = {};
     const taskArray = allTasks[taskArrayRefName] || []; // 确保 taskArrayRefName 对应的数组存在
 
-if (type === 'future') {
+    if (type === 'future') {
         const taskDateTimeValue = dateElement ? dateElement.value : '';
         newTask = { id: generateUniqueId(), text: taskText, completed: false, links: [] };
         if (taskDateTimeValue) {
@@ -1288,20 +1292,17 @@ if (type === 'future') {
             if (!isNaN(reminderTimestamp) && reminderTimestamp > Date.now()) {
                 newTask.reminderTime = reminderTimestamp;
                 
-                // --- 【核心修改】 ---
-                // 调用新的后端调度函数，而不是向 Service Worker 发送消息
-                // 我们不再需要检查 notificationsEnabled，因为后端提醒总是需要订阅
+                // --- 【核心修改开始】 ---
+                // 这里我们不再向 Service Worker 发送本地调度消息，
+                // 而是直接调用新的辅助函数，将提醒任务交由 Cloudflare Worker 在云端处理。
+                // 这确保了提醒的可靠性，即使用户关闭了浏览器。
+                
                 scheduleReminderWithBackend(newTask); 
-                // --------------------
+                
+                // --- 【核心修改结束】 ---
 
             } else { 
-                newTask.date = taskDateTimeValue.split('T')[0];
-                if(taskDateTimeValue && (isNaN(reminderTimestamp) || reminderTimestamp <= Date.now())) {
-                    console.warn(`[PWA App] Future task "${taskText}" date/time (${taskDateTimeValue}) is invalid or in the past. Storing date only: ${newTask.date}`);
-                }
-            }
-        }
-    }else { 
+                // 如果用户选择的日期是过去时，或者格式不正确，则只保存日期部分，不设置提醒
                 newTask.date = taskDateTimeValue.split('T')[0]; // 存储 YYYY-MM-DD 格式的日期
                 if(taskDateTimeValue && (isNaN(reminderTimestamp) || reminderTimestamp <= Date.now())) {
                     console.warn(`[PWA App] Future task "${taskText}" date/time (${taskDateTimeValue}) is invalid or in the past. Storing date only: ${newTask.date}`);
@@ -1309,7 +1310,7 @@ if (type === 'future') {
             }
         }
     } else if (type === 'daily') {
-        // --- START OF REPLACEMENT ---
+        // 这部分逻辑保持不变
         const cycleSelect = document.getElementById('new-daily-task-cycle-select');
         const cycleValue = cycleSelect ? cycleSelect.value : 'daily';
         
@@ -1319,17 +1320,28 @@ if (type === 'future') {
             completed: false, 
             note: '', 
             links: [],
-            cycle: cycleValue // 新增周期属性
+            cycle: cycleValue // 周期属性
         };
         
         // 如果是不重复任务，记录创建日期
         if (cycleValue === 'once') {
             newTask.creationDate = getTodayString();
         }
-        // --- END OF REPLACEMENT ---
     } else if (type === 'monthly') {
+        // 这部分逻辑保持不变
         const tagsString = tagsInputElement ? tagsInputElement.value.trim() : '';
-        newTask = { id: generateUniqueId(), text: taskText, completed: false, links: [], progress: 0, progressText: '', subtasks: [], tags: tagsString ? tagsString.split(',').map(tag => tag.trim()).filter(Boolean) : [], completionDate: null, priority: 2 };
+        newTask = { 
+            id: generateUniqueId(), 
+            text: taskText, 
+            completed: false, 
+            links: [], 
+            progress: 0, 
+            progressText: '', 
+            subtasks: [], 
+            tags: tagsString ? tagsString.split(',').map(tag => tag.trim()).filter(Boolean) : [], 
+            completionDate: null, 
+            priority: 2 
+        };
     } else {
         console.error("Unknown task type:", type);
         return;
@@ -1339,12 +1351,20 @@ if (type === 'future') {
     if (!allTasks[taskArrayRefName]) {
         allTasks[taskArrayRefName] = [];
     }
+    // 将新任务添加到数组的开头
     allTasks[taskArrayRefName].unshift(newTask);
 
+    // 清空输入框
     inputElement.value = '';
     if (tagsInputElement) tagsInputElement.value = '';
     if (dateElement) dateElement.value = ''; // 清空日期时间选择器
-    saveTasks().then(() => { if (onCompleteCallback) onCompleteCallback(); });
+
+    // 保存数据并刷新UI
+    saveTasks().then(() => { 
+        if (onCompleteCallback) {
+            onCompleteCallback(); 
+        }
+    });
 }
 
 async function loadNotificationSetting() { 
