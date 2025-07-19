@@ -28,6 +28,55 @@ const db = (() => {
         });
     }
 
+const REMINDER_WORKER_URL = 'https://efficien-todo-reminders.martinlinzhiwu.workers.dev/';
+
+async function scheduleReminderWithBackend(task) {
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+        console.warn('Push API not supported, cannot schedule backend reminder.');
+        return;
+    }
+
+    try {
+        // 首先，确保我们有一个有效的推送订阅
+        // subscribeUserToPush 函数会在需要时自动处理权限请求和订阅流程
+        const subscription = await subscribeUserToPush();
+        
+        if (!subscription) {
+            console.error('Failed to get push subscription. Cannot schedule reminder on backend.');
+            // 可以选择性地给用户一个提示
+            openCustomPrompt({
+                title: "提醒设置失败",
+                message: "我们无法获取您的设备推送许可，因此无法设置云端提醒。请确保您已允许本站的通知权限。",
+                inputType: 'none',
+                confirmText: '好的',
+                hideCancelButton: true,
+            });
+            return;
+        }
+
+        console.log(`Sending task ID ${task.id} to backend for scheduling.`);
+        
+        const response = await fetch(REMINDER_WORKER_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                subscription: subscription.toJSON(), // 发送订阅信息的JSON表示
+                task: task
+            }),
+        });
+
+        if (!response.ok) {
+            throw new Error(`Backend scheduling failed with status: ${response.status}`);
+        }
+
+        console.log(`Task ID ${task.id} successfully scheduled on backend.`);
+
+    } catch (error) {
+        console.error('Error scheduling reminder with backend:', error);
+    }
+}
 
 
     function promisifyRequest(request) {
@@ -1230,7 +1279,7 @@ function addTask(inputElement, taskArrayRefName, onCompleteCallback, options = {
     let newTask = {};
     const taskArray = allTasks[taskArrayRefName] || []; // 确保 taskArrayRefName 对应的数组存在
 
- if (type === 'future') {
+if (type === 'future') {
         const taskDateTimeValue = dateElement ? dateElement.value : '';
         newTask = { id: generateUniqueId(), text: taskText, completed: false, links: [] };
         if (taskDateTimeValue) {
@@ -1239,23 +1288,20 @@ function addTask(inputElement, taskArrayRefName, onCompleteCallback, options = {
             if (!isNaN(reminderTimestamp) && reminderTimestamp > Date.now()) {
                 newTask.reminderTime = reminderTimestamp;
                 
-                // 【核心修正】增加健壮的提醒调度逻辑
-                if (notificationsEnabled && 'serviceWorker' in navigator) {
-                    // 使用 navigator.serviceWorker.ready 来确保 SW 已激活
-                    navigator.serviceWorker.ready.then(registration => {
-                        if (registration.active) {
-                            registration.active.postMessage({ type: 'SCHEDULE_REMINDER', payload: { task: newTask } });
-                            console.log(`[PWA App] SCHEDULE_REMINDER for task ID ${newTask.id} sent to active Service Worker.`);
-                        } else {
-                             console.warn(`[PWA App] Reminder for task ID ${newTask.id} NOT sent: Service Worker is ready but has no active worker.`);
-                        }
-                    }).catch(error => {
-                        console.error(`[PWA App] Error waiting for Service Worker to be ready for task ${newTask.id}:`, error);
-                    });
-                } else if (notificationsEnabled) {
-                     console.warn(`[PWA App] Reminder for task ID ${newTask.id} NOT sent: Service Worker API not available or notificationsEnabled is false.`);
-                }
+                // --- 【核心修改】 ---
+                // 调用新的后端调度函数，而不是向 Service Worker 发送消息
+                // 我们不再需要检查 notificationsEnabled，因为后端提醒总是需要订阅
+                scheduleReminderWithBackend(newTask); 
+                // --------------------
+
             } else { 
+                newTask.date = taskDateTimeValue.split('T')[0];
+                if(taskDateTimeValue && (isNaN(reminderTimestamp) || reminderTimestamp <= Date.now())) {
+                    console.warn(`[PWA App] Future task "${taskText}" date/time (${taskDateTimeValue}) is invalid or in the past. Storing date only: ${newTask.date}`);
+                }
+            }
+        }
+    }else { 
                 newTask.date = taskDateTimeValue.split('T')[0]; // 存储 YYYY-MM-DD 格式的日期
                 if(taskDateTimeValue && (isNaN(reminderTimestamp) || reminderTimestamp <= Date.now())) {
                     console.warn(`[PWA App] Future task "${taskText}" date/time (${taskDateTimeValue}) is invalid or in the past. Storing date only: ${newTask.date}`);
