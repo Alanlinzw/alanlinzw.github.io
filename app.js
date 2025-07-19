@@ -28,55 +28,6 @@ const db = (() => {
         });
     }
 
-const REMINDER_WORKER_URL = 'https://efficien-todo-reminders.martinlinzhiwu.workers.dev/';
-
-async function scheduleReminderWithBackend(task) {
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-        console.warn('Push API not supported, cannot schedule backend reminder.');
-        return;
-    }
-
-    try {
-        // 首先，确保我们有一个有效的推送订阅
-        // subscribeUserToPush 函数会在需要时自动处理权限请求和订阅流程
-        const subscription = await subscribeUserToPush();
-        
-        if (!subscription) {
-            console.error('Failed to get push subscription. Cannot schedule reminder on backend.');
-            // 可以选择性地给用户一个提示
-            openCustomPrompt({
-                title: "提醒设置失败",
-                message: "我们无法获取您的设备推送许可，因此无法设置云端提醒。请确保您已允许本站的通知权限。",
-                inputType: 'none',
-                confirmText: '好的',
-                hideCancelButton: true,
-            });
-            return;
-        }
-
-        console.log(`Sending task ID ${task.id} to backend for scheduling.`);
-        
-        const response = await fetch(REMINDER_WORKER_URL, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                subscription: subscription.toJSON(), // 发送订阅信息的JSON表示
-                task: task
-            }),
-        });
-
-        if (!response.ok) {
-            throw new Error(`Backend scheduling failed with status: ${response.status}`);
-        }
-
-        console.log(`Task ID ${task.id} successfully scheduled on backend.`);
-
-    } catch (error) {
-        console.error('Error scheduling reminder with backend:', error);
-    }
-}
 
 
     function promisifyRequest(request) {
@@ -1270,6 +1221,77 @@ function applyTheme(theme) { document.documentElement.setAttribute('data-theme',
 function toggleTheme() { const newTheme = currentTheme === 'light' ? 'dark' : 'light'; applyTheme(newTheme); localStorage.setItem('theme', newTheme); }
 function loadTheme() { const savedTheme = localStorage.getItem('theme') || 'light'; applyTheme(savedTheme); }
 function generateUniqueId() { return `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`; }
+
+// app.js (请将这段缺失的代码添加到您的文件中)
+
+// 【重要】将下面的 URL 替换为你自己的 Cloudflare Worker 地址
+// 格式通常是: https://YOUR-WORKER-NAME.YOUR-USERNAME.workers.dev
+const REMINDER_WORKER_URL = 'https://efficien-todo-reminders.martinlinzhiwu.workers.dev/';
+
+/**
+ * 将提醒任务发送到后端(Cloudflare Worker)进行调度
+ * @param {object} task - 需要被调度的任务对象
+ */
+async function scheduleReminderWithBackend(task) {
+    // 检查浏览器是否支持推送功能
+    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+        console.warn('Push API not supported, cannot schedule backend reminder.');
+        return; // 如果不支持，则静默失败
+    }
+
+    try {
+        // 首先，确保我们有一个有效的推送订阅。
+        // subscribeUserToPush 函数会在需要时自动处理权限请求和订阅流程。
+        const subscription = await subscribeUserToPush();
+        
+        if (!subscription) {
+            // 如果获取订阅失败，则无法继续
+            console.error('Failed to get push subscription. Cannot schedule reminder on backend.');
+            // (可选) 给用户一个明确的提示
+            openCustomPrompt({
+                title: "提醒设置失败",
+                message: "我们无法获取您设备的推送许可，因此无法设置云端提醒。请确保您已允许本站的通知权限，然后重试。",
+                inputType: 'none',
+                confirmText: '好的',
+                hideCancelButton: true,
+            });
+            return;
+        }
+
+        console.log(`[PWA App] Sending task ID ${task.id} to backend for scheduling.`);
+        
+        // 向我们的 Cloudflare Worker 发送请求
+        const response = await fetch(REMINDER_WORKER_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                subscription: subscription.toJSON(), // 发送订阅信息的JSON表示形式
+                task: task                      // 发送任务详情
+            }),
+        });
+
+        if (!response.ok) {
+            // 如果后端返回错误，则抛出异常
+            throw new Error(`Backend scheduling failed with status: ${response.status}`);
+        }
+
+        const responseText = await response.text();
+        console.log(`[PWA App] Backend response: "${responseText}" for Task ID ${task.id}`);
+
+    } catch (error) {
+        console.error('Error scheduling reminder with backend:', error);
+        // 如果出错，也可以给用户一个提示
+        openCustomPrompt({
+            title: "云端提醒设置出错",
+            message: `与提醒服务器通信时发生错误，您的提醒可能未能成功设置。请检查您的网络连接并重试。\n错误详情: ${error.message}`,
+            inputType: 'none',
+            confirmText: '好的',
+            hideCancelButton: true,
+        });
+    }
+}
 
 // ========================================================================
 // app.js -> addTask 函数 (修改后，用于调用 Cloudflare Worker)
