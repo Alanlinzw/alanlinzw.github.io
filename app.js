@@ -1222,81 +1222,6 @@ function toggleTheme() { const newTheme = currentTheme === 'light' ? 'dark' : 'l
 function loadTheme() { const savedTheme = localStorage.getItem('theme') || 'light'; applyTheme(savedTheme); }
 function generateUniqueId() { return `task_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`; }
 
-// app.js (请将这段缺失的代码添加到您的文件中)
-
-// 【重要】将下面的 URL 替换为你自己的 Cloudflare Worker 地址
-// 格式通常是: https://YOUR-WORKER-NAME.YOUR-USERNAME.workers.dev
-const REMINDER_WORKER_URL = 'https://efficien-todo-reminders.martinlinzhiwu.workers.dev/';
-
-/**
- * 将提醒任务发送到后端(Cloudflare Worker)进行调度
- * @param {object} task - 需要被调度的任务对象
- */
-async function scheduleReminderWithBackend(task) {
-    // 检查浏览器是否支持推送功能
-    if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
-        console.warn('Push API not supported, cannot schedule backend reminder.');
-        return; // 如果不支持，则静默失败
-    }
-
-    try {
-        // 首先，确保我们有一个有效的推送订阅。
-        // subscribeUserToPush 函数会在需要时自动处理权限请求和订阅流程。
-        const subscription = await subscribeUserToPush();
-        
-        if (!subscription) {
-            // 如果获取订阅失败，则无法继续
-            console.error('Failed to get push subscription. Cannot schedule reminder on backend.');
-            // (可选) 给用户一个明确的提示
-            openCustomPrompt({
-                title: "提醒设置失败",
-                message: "我们无法获取您设备的推送许可，因此无法设置云端提醒。请确保您已允许本站的通知权限，然后重试。",
-                inputType: 'none',
-                confirmText: '好的',
-                hideCancelButton: true,
-            });
-            return;
-        }
-
-        console.log(`[PWA App] Sending task ID ${task.id} to backend for scheduling.`);
-        
-        // 向我们的 Cloudflare Worker 发送请求
-        const response = await fetch(REMINDER_WORKER_URL, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                subscription: subscription.toJSON(), // 发送订阅信息的JSON表示形式
-                task: task                      // 发送任务详情
-            }),
-        });
-
-        if (!response.ok) {
-            // 如果后端返回错误，则抛出异常
-            throw new Error(`Backend scheduling failed with status: ${response.status}`);
-        }
-
-        const responseText = await response.text();
-        console.log(`[PWA App] Backend response: "${responseText}" for Task ID ${task.id}`);
-
-    } catch (error) {
-        console.error('Error scheduling reminder with backend:', error);
-        // 如果出错，也可以给用户一个提示
-        openCustomPrompt({
-            title: "云端提醒设置出错",
-            message: `与提醒服务器通信时发生错误，您的提醒可能未能成功设置。请检查您的网络连接并重试。\n错误详情: ${error.message}`,
-            inputType: 'none',
-            confirmText: '好的',
-            hideCancelButton: true,
-        });
-    }
-}
-
-// ========================================================================
-// app.js -> addTask 函数 (修改后，用于调用 Cloudflare Worker)
-// ========================================================================
-
 function addTask(inputElement, taskArrayRefName, onCompleteCallback, options = {}) {
     const { type, tagsInputElement, dateElement } = options;
     const taskText = inputElement.value.trim();
@@ -1305,7 +1230,7 @@ function addTask(inputElement, taskArrayRefName, onCompleteCallback, options = {
     let newTask = {};
     const taskArray = allTasks[taskArrayRefName] || []; // 确保 taskArrayRefName 对应的数组存在
 
-    if (type === 'future') {
+ if (type === 'future') {
         const taskDateTimeValue = dateElement ? dateElement.value : '';
         newTask = { id: generateUniqueId(), text: taskText, completed: false, links: [] };
         if (taskDateTimeValue) {
@@ -1314,17 +1239,23 @@ function addTask(inputElement, taskArrayRefName, onCompleteCallback, options = {
             if (!isNaN(reminderTimestamp) && reminderTimestamp > Date.now()) {
                 newTask.reminderTime = reminderTimestamp;
                 
-                // --- 【核心修改开始】 ---
-                // 这里我们不再向 Service Worker 发送本地调度消息，
-                // 而是直接调用新的辅助函数，将提醒任务交由 Cloudflare Worker 在云端处理。
-                // 这确保了提醒的可靠性，即使用户关闭了浏览器。
-                
-                scheduleReminderWithBackend(newTask); 
-                
-                // --- 【核心修改结束】 ---
-
+                // 【核心修正】增加健壮的提醒调度逻辑
+                if (notificationsEnabled && 'serviceWorker' in navigator) {
+                    // 使用 navigator.serviceWorker.ready 来确保 SW 已激活
+                    navigator.serviceWorker.ready.then(registration => {
+                        if (registration.active) {
+                            registration.active.postMessage({ type: 'SCHEDULE_REMINDER', payload: { task: newTask } });
+                            console.log(`[PWA App] SCHEDULE_REMINDER for task ID ${newTask.id} sent to active Service Worker.`);
+                        } else {
+                             console.warn(`[PWA App] Reminder for task ID ${newTask.id} NOT sent: Service Worker is ready but has no active worker.`);
+                        }
+                    }).catch(error => {
+                        console.error(`[PWA App] Error waiting for Service Worker to be ready for task ${newTask.id}:`, error);
+                    });
+                } else if (notificationsEnabled) {
+                     console.warn(`[PWA App] Reminder for task ID ${newTask.id} NOT sent: Service Worker API not available or notificationsEnabled is false.`);
+                }
             } else { 
-                // 如果用户选择的日期是过去时，或者格式不正确，则只保存日期部分，不设置提醒
                 newTask.date = taskDateTimeValue.split('T')[0]; // 存储 YYYY-MM-DD 格式的日期
                 if(taskDateTimeValue && (isNaN(reminderTimestamp) || reminderTimestamp <= Date.now())) {
                     console.warn(`[PWA App] Future task "${taskText}" date/time (${taskDateTimeValue}) is invalid or in the past. Storing date only: ${newTask.date}`);
@@ -1332,7 +1263,7 @@ function addTask(inputElement, taskArrayRefName, onCompleteCallback, options = {
             }
         }
     } else if (type === 'daily') {
-        // 这部分逻辑保持不变
+        // --- START OF REPLACEMENT ---
         const cycleSelect = document.getElementById('new-daily-task-cycle-select');
         const cycleValue = cycleSelect ? cycleSelect.value : 'daily';
         
@@ -1342,28 +1273,17 @@ function addTask(inputElement, taskArrayRefName, onCompleteCallback, options = {
             completed: false, 
             note: '', 
             links: [],
-            cycle: cycleValue // 周期属性
+            cycle: cycleValue // 新增周期属性
         };
         
         // 如果是不重复任务，记录创建日期
         if (cycleValue === 'once') {
             newTask.creationDate = getTodayString();
         }
+        // --- END OF REPLACEMENT ---
     } else if (type === 'monthly') {
-        // 这部分逻辑保持不变
         const tagsString = tagsInputElement ? tagsInputElement.value.trim() : '';
-        newTask = { 
-            id: generateUniqueId(), 
-            text: taskText, 
-            completed: false, 
-            links: [], 
-            progress: 0, 
-            progressText: '', 
-            subtasks: [], 
-            tags: tagsString ? tagsString.split(',').map(tag => tag.trim()).filter(Boolean) : [], 
-            completionDate: null, 
-            priority: 2 
-        };
+        newTask = { id: generateUniqueId(), text: taskText, completed: false, links: [], progress: 0, progressText: '', subtasks: [], tags: tagsString ? tagsString.split(',').map(tag => tag.trim()).filter(Boolean) : [], completionDate: null, priority: 2 };
     } else {
         console.error("Unknown task type:", type);
         return;
@@ -1373,20 +1293,12 @@ function addTask(inputElement, taskArrayRefName, onCompleteCallback, options = {
     if (!allTasks[taskArrayRefName]) {
         allTasks[taskArrayRefName] = [];
     }
-    // 将新任务添加到数组的开头
     allTasks[taskArrayRefName].unshift(newTask);
 
-    // 清空输入框
     inputElement.value = '';
     if (tagsInputElement) tagsInputElement.value = '';
     if (dateElement) dateElement.value = ''; // 清空日期时间选择器
-
-    // 保存数据并刷新UI
-    saveTasks().then(() => { 
-        if (onCompleteCallback) {
-            onCompleteCallback(); 
-        }
-    });
+    saveTasks().then(() => { if (onCompleteCallback) onCompleteCallback(); });
 }
 
 async function loadNotificationSetting() { 
@@ -3490,7 +3402,7 @@ async function subscribeUserToPush() {
 
         // 4. 如果没有，则创建新订阅
         console.log('No existing subscription, attempting to create a new one...');
-        const vapidPublicKey = 'BDkvyZjV1S_Z50j9WbJS6wWlYjNfuV24-QD_H2d-ACL51jDPyUbSyf-t8SJihUELQ8fzvWARv_dVGgEikfg8M10';
+        const vapidPublicKey = 'BOPBv2iLpTziiOOTjw8h2cT24-R_5c0s_q2ITf0JOTooBKiJBDl3bBROi4e_d_2dJd_quNBs2LrqEa2K_u_XGgY';
         if (!vapidPublicKey) {
             console.error("VAPID public key is missing.");
             openCustomPrompt({title:"配置错误", message:'推送通知配置不完整，无法订阅。', inputType:'none', hideCancelButton:true, confirmText:'好的'});
