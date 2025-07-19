@@ -3490,7 +3490,7 @@ async function subscribeUserToPush() {
 
         // 4. 如果没有，则创建新订阅
         console.log('No existing subscription, attempting to create a new one...');
-        const vapidPublicKey = 'BOPBv2iLpTziiOOTjw8h2cT24-R_5c0s_q2ITf0JOTooBKiJBDl3bBROi4e_d_2dJd_quNBs2LrqEa2K_u_XGgY';
+        const vapidPublicKey = 'BDkvyZjV1S_Z50j9WbJS6wWlYjNfuV24-QD_H2d-ACL51jDPyUbSyf-t8SJihUELQ8fzvWARv_dVGgEikfg8M10';
         if (!vapidPublicKey) {
             console.error("VAPID public key is missing.");
             openCustomPrompt({title:"配置错误", message:'推送通知配置不完整，无法订阅。', inputType:'none', hideCancelButton:true, confirmText:'好的'});
