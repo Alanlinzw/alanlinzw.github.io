@@ -233,9 +233,61 @@ ALWAYS return only the raw JSON.
     }
 };
 
-// 在 popup.js 中，用这个完整的版本替换现有的 getReportData 函数
+/**
+ * 【新增函数】
+ * 将提醒任务发送到 Cloudflare Worker 进行调度。
+ * @param {object} task - 要调度的任务对象。
+ * @param {'schedule'|'cancel'} action - 'schedule' 来设置提醒, 'cancel' 来取消。
+ */
+async function scheduleReminderWithCloudflare(task, action) {
+    // 【重要】请将下面的 URL 替换为您自己的 Cloudflare Worker 地址
+    const CLOUDFLARE_WORKER_URL = 'https://efficien-todo-scheduler.martinlinzhiwu.workers.dev/schedule-reminder';
 
-// 在 popup.js 中，用这个完整的、修复了语法错误的版本替换现有的 getReportData 函数
+    try {
+        // 从 IndexedDB 获取已保存的 PushSubscription
+        const subscription = await db.get('pushSubscription');
+        if (!subscription) {
+            console.warn('无法调度云端提醒：找不到用户的推送订阅信息。');
+            // 可以选择在这里提示用户需要重新开启通知
+            // openCustomPrompt({title:"提示", message:"需要重新开启通知才能使用云端提醒功能。", ...});
+            return;
+        }
+
+        const payload = {
+            action: action, // 'schedule' 或 'cancel'
+            subscription: subscription,
+            task: {
+                id: task.id,
+                text: task.text,
+                reminderTime: task.reminderTime // 确保这是毫秒级时间戳
+            }
+        };
+
+        const response = await fetch(CLOUDFLARE_WORKER_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(errorData.error || '与云端提醒服务器通信失败。');
+        }
+
+        console.log(`[Cloud-Sync] 成功将任务 "${task.text}" 的 ${action} 请求发送到云端。`);
+
+    } catch (error) {
+        console.error('[Cloud-Sync] 发送提醒到云端时出错:', error);
+        // 向用户显示一个非阻塞的错误提示
+        openCustomPrompt({
+            title: "云端提醒失败",
+            message: `无法将提醒同步到云端。应用将尝试在本地提醒，但这可能不可靠。\n错误: ${error.message}`,
+            inputType: 'none',
+            confirmText: '好的',
+            hideCancelButton: true
+        });
+    }
+}
 
 /**
  * 根据报告类型，准备要发送给AI的原始数据
@@ -402,6 +454,9 @@ async function generateCodeChallenge(verifier) {
         .replace(/\//g, '_')
         .replace(/=/g, '');
 }
+
+
+
 
 // ========================================================================
 // 修正后的 Google Drive 同步模块
@@ -1239,22 +1294,13 @@ function addTask(inputElement, taskArrayRefName, onCompleteCallback, options = {
             if (!isNaN(reminderTimestamp) && reminderTimestamp > Date.now()) {
                 newTask.reminderTime = reminderTimestamp;
                 
-                // 【核心修正】增加健壮的提醒调度逻辑
-                if (notificationsEnabled && 'serviceWorker' in navigator) {
-                    // 使用 navigator.serviceWorker.ready 来确保 SW 已激活
-                    navigator.serviceWorker.ready.then(registration => {
-                        if (registration.active) {
-                            registration.active.postMessage({ type: 'SCHEDULE_REMINDER', payload: { task: newTask } });
-                            console.log(`[PWA App] SCHEDULE_REMINDER for task ID ${newTask.id} sent to active Service Worker.`);
-                        } else {
-                             console.warn(`[PWA App] Reminder for task ID ${newTask.id} NOT sent: Service Worker is ready but has no active worker.`);
-                        }
-                    }).catch(error => {
-                        console.error(`[PWA App] Error waiting for Service Worker to be ready for task ${newTask.id}:`, error);
-                    });
-                } else if (notificationsEnabled) {
-                     console.warn(`[PWA App] Reminder for task ID ${newTask.id} NOT sent: Service Worker API not available or notificationsEnabled is false.`);
+                // --- 【核心修改】 ---
+                // 移除旧的 postMessage 逻辑，改为调用云端调度函数
+                if (notificationsEnabled) {
+                    // 调用新函数，将任务发送到 Cloudflare 进行可靠调度
+                    scheduleReminderWithCloudflare(newTask, 'schedule');
                 }
+                // --- 修改结束 ---
             } else { 
                 newTask.date = taskDateTimeValue.split('T')[0]; // 存储 YYYY-MM-DD 格式的日期
                 if(taskDateTimeValue && (isNaN(reminderTimestamp) || reminderTimestamp <= Date.now())) {
@@ -2777,12 +2823,14 @@ function createTaskActions(task, type, index, isHistoryView) {
         e.stopPropagation();
         if (index < 0) { console.warn("删除按钮的索引无效", type, index); return; }
 
-        // 如果删除的是一个设置了提醒的未来任务，通知 SW 取消提醒
-        if (type === 'future' && task.id && task.reminderTime && 
-            'serviceWorker' in navigator && navigator.serviceWorker.controller) {
-            console.log(`[PWA App] Sending CANCEL_REMINDER for future task ID ${task.id} to Service Worker.`);
-            navigator.serviceWorker.controller.postMessage({ type: 'CANCEL_REMINDER', payload: { taskId: task.id } });
+        // --- 【核心修改】 ---
+        // 如果删除的是一个设置了提醒的未来任务，通知后端取消提醒
+        if (type === 'future' && task.id && task.reminderTime) {
+            console.log(`[PWA App] Sending cancel request for future task ID ${task.id} to Cloudflare.`);
+            // 调用云端调度函数来取消
+            scheduleReminderWithCloudflare(task, 'cancel');
         }
+        // --- 修改结束 ---
         
         const currentTaskArray = allTasks[type];
         if (currentTaskArray && currentTaskArray[index]) { 
