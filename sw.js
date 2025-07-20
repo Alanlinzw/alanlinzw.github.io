@@ -408,17 +408,6 @@ self.addEventListener('message', event => {
             })();
             break;
             
-        case 'SCHEDULE_REMINDER':
-            if (payload?.task?.id && payload?.task?.reminderTime) {
-                const { task } = payload;
-                const delay = new Date(task.reminderTime).getTime() - Date.now();
-                if (delay > 0) {
-                    setTimeout(() => checkAndShowNotifications(), delay);
-                }
-            }
-            // 【修复】即使没有显式任务，也发送一个通用响应
-            respond({ success: true, action: 'SCHEDULE_REMINDER', status: 'received' });
-            break;
 
         case 'skipWaiting':
             self.skipWaiting();
@@ -533,6 +522,43 @@ async function checkAndShowNotifications() {
 // ========================================================================
 // 4. 通知点击事件处理
 // ========================================================================
+self.addEventListener('push', event => {
+    console.log('[SW] Push Received.');
+    
+    // 默认的通知内容
+    let title = '高效待办清单';
+    let options = {
+        body: '你有一条新的提醒！',
+        icon: '/images/icons/icon-192x192.png',
+        badge: '/images/icons/icon-192x192.png', // 用于 Android
+        data: { 
+            url: self.registration.scope // 默认点击打开首页
+        }
+    };
+
+    // 【核心修改】尝试解析从 Cloudflare Worker 发来的数据
+    if (event.data) {
+        try {
+            // 假设你的 Worker 发送了如下格式的 JSON:
+            // { "title": "提醒", "body": "去开会", "url": "/#future-section", "tag": "task_12345" }
+            const data = event.data.json();
+            title = data.title || title;
+            options.body = data.body || options.body;
+            if (data.url) options.data.url = data.url;
+            if (data.tag) options.tag = data.tag; // 使用任务ID作为tag，防止相同任务的通知重复出现
+            console.log('[SW] Push data parsed:', data);
+        } catch (e) {
+            console.log('[SW] Push event data is not JSON, treating as text:', event.data.text());
+            options.body = event.data.text();
+        }
+    }
+
+    // 显示通知
+    event.waitUntil(
+        self.registration.showNotification(title, options)
+    );
+});
+
 self.addEventListener('notificationclick', event => {
     console.log('[SW] Notification click Received.', event.notification);
     event.notification.close(); // 关闭通知
