@@ -772,6 +772,89 @@ const versionUpdateNotes = {
     "3.3.0": ["增加“每日清单”互动反馈提示"],
     "3.2.0": ["优化插件Google Drive 云同步体验"],
     "3.1.0": ["【核心增强】“PWA应用发布。可以将其“安装”到手机主屏幕或桌面"],"3.0.0": [ "【核心重构】引入Google Drive云同步功能，替换原有的Chrome同步机制作为主要数据存储：", "    - **数据更安全：** 您的所有任务和账单数据现在存储在您自己的Google Drive上的特定文件 (`efficienTodoData.json`) 中，由您完全掌控。", "    - **手动与自动同步：** 您可以随时手动点击“同步”按钮与Google Drive同步。同时，插件会在您进行修改后、打开时以及后台定期尝试自动同步，确保数据尽可能保持最新。", "    - **首次使用：** 新安装或从旧版本更新后，请点击“同步”按钮完成Google Drive授权，以启用云同步功能。", "【提醒功能改进】未来计划的提醒闹钟机制优化，提升了任务编辑后提醒的稳定性。", ], "2.1.0": [ "【记账本增强】引入强大的财务管理功能：", "    - **预算管理**：现在可以为每个项目设置月度预算，并在统计中通过进度条直观地查看开销情况。", "    - **年度报告**：一键生成年度收支报告，清晰汇总全年总支出、月均消费，并按项目和月份提供详细分类，助您轻松回顾财务状况。", "    - **多货币支持**：新增货币符号切换功能，支持在全球热门货币（如¥, €, £等）之间选择，满足国际化记账需求。" ], "2.0.0": [ "【核心功能】新增“统计分析”模块，提供多维度任务和账单数据可视化报告，助您洞察效率与开销。", "【功能增强】“本月待办”模块引入任务优先级管理：", "    - 支持为任务设置高、中、低三个优先级。", "    - 可按优先级一键排序任务列表。", "    - 拖拽排序依然有效，提供灵活的任务组织方式。" ], "1.9.0": [ "【核心功能】新增快速添加任务方式：", "1. **右键菜单**：在任何网页上选中文本，右键选择“添加到高效待办清单”，即可快速创建到“本月待办”。", "2. **地址栏命令**：在浏览器地址栏输入 'todo'，按 Tab 或空格，再输入任务内容并回车，即可快速添加。" ], "1.8.0": ["【核心功能】“未来计划”模块新增桌面提醒功能，可以为任务设置精确到分钟的提醒时间。"], "1.7.0": ["优化看板页面体验，增加顶部固定导航，长页面滚动和切换不再繁琐。"], "1.6.0": ["新增搜索框，可以实时搜索所有列表中的任务和记账条目。"], "1.5.0": ["新增当月条目归档功能，将当月任务归档到过去月份。"], "1.4.0": [ "为“本月待办”和“记账本”模块增加了 Excel(xlsx) 导入导出功能。", "现在可以下载数据模板，方便地批量添加任务和账单。", "可以一键导出所有历史归档数据，便于备份和分析。" ], "1.3.0": [ "记账本模块新增历史数据归档与月度账单统计功能，方便回顾与分析。", "本月待办模块增加历史月份查阅功能，轻松回顾过往任务。", "本月待办任务完成后，自动标记完成日期。" ] };
+const dailyQuotes = [
+  // --- 经典励志 ---
+  "千里之行，始于足下。",
+  "一个今天胜过两个明天。",
+  "事竟成，功在不舍。",
+  "业精于勤，荒于嬉。",
+  "拖延是时间的窃贼。",
+  "完成任务的最佳方式，就是开始做。",
+  "明日复明日，明日何其多。我生待明日，万事成蹉跎。",
+  "宝剑锋从磨砺出，梅花香自苦寒来。",
+  "书山有路勤为径，学海无涯苦作舟。",
+  "欲穷千里目，更上一层楼。",
+  "海纳百川，有容乃大。",
+  "路漫漫其修远兮，吾将上下而求索。",
+
+  // --- 认知与心态 ---
+  "专注，是这个时代最稀缺的能力。",
+  "你无法控制风向，但你可以调整风帆。",
+  "休息，是为了走更远的路。",
+  "重要的不是你站的位置，而是你面向的方向。",
+  "把每一次的失败，都归结为一次尝试。",
+  "行动是治愈恐惧的良药，而犹豫、拖延将不断滋养恐惧。",
+  "成长的过程就是破茧成蝶，挣扎着褪掉所有的青涩和丑陋。",
+  "改变不了环境，就改变心境。",
+  "困难像弹簧，你强它就弱，你弱它就强。",
+  "心态决定状态，思路决定出路。",
+  "每一个不曾起舞的日子，都是对生命的辜负。",
+  "你的格局决定你的结局。",
+
+  // --- 轻松有趣 ---
+  "你知道吗？章母有三颗心脏。",
+  "人生苦短，我用Python...不，我用清单。",
+  "别担心，这个任务看起来比实际上要简单。",
+  "给你的大脑一点空间，去散个步吧！",
+  "一杯咖啡，一个清单，征服世界的一天。",
+  "又是被待办事项包围的一天，加油鸭！",
+  "Deadline 是第一生产力。",
+  "你知道吗？水獭在睡觉时会手拉着手，以防被水冲散。",
+  "企鹅走路看起来笨拙，但它们游泳速度可达时速25公里。",
+  "今天也要像熊猫一样可爱地完成任务呢。",
+  "Bug不是程序的错，是程序员太天真。",
+  "生活就像代码，总有调试的时候。",
+  "你知道吗？蜂鸟是唯一能倒着飞的鸟。",
+  "做人要像向日葵一样，永远面向阳光。",
+
+  // --- 时间管理 ---
+  "时间是最公平的，每个人一天都是24小时。",
+  "合理安排时间，就等于节约时间。",
+  "今天的事今天做，不要拖到明天。",
+  "时间不会等人，但高效的人会追上时间。",
+  "把时间花在刀刃上，而不是刀柄上。",
+  "一寸光阴一寸金，寸金难买寸光阴。",
+
+  // --- 更多名言 ---
+  "The secret of getting ahead is getting started. - Mark Twain",
+  "Well done is better than well said. - Benjamin Franklin",
+  "Simplicity is the ultimate sophistication. - Leonardo da Vinci",
+  "不要让未来的你，讨厌现在的自己。",
+  "种一棵树最好的时间是十年前，其次是现在。",
+  "即使是最小的行动，也胜过最伟大的意图。",
+  "It does not matter how slowly you go as long as you do not stop. - Confucius",
+  "Your future is created by what you do today, not tomorrow. - Robert Kiyosaki",
+  "A goal without a plan is just a wish. - Antoine de Saint-Exupéry",
+  "The way to get started is to quit talking and begin doing. - Walt Disney",
+  "Don't wait for opportunity. Create it. - George Bernard Shaw",
+  "Success is not final, failure is not fatal: it is the courage to continue that counts. - Winston Churchill",
+
+  // --- 自我提升 ---
+  "每天进步一点点，就是成功的开始。",
+  "学而时习之，不亦说乎？",
+  "读万卷书，行万里路。",
+  "活到老，学到老。",
+  "知识改变命运，学习改变人生。",
+  "投资自己的大脑，永远不会亏本。",
+
+  // --- 坚持与毅力 ---
+  "滴水穿石，不是力量大，而是功夫深。",
+  "山不在高，有仙则名；水不在深，有龙则灵。",
+  "只要功夫深，铁杵磨成针。",
+  "不积跬步，无以至千里；不积小流，无以成江海。",
+  "坚持就是胜利，放弃就是失败。",
+  "成功路上没有捷径，只有坚持不懈的努力。"
+];
 
 // ========================================================================
 // 3. 全局DOM元素变量
@@ -783,6 +866,8 @@ let statsBtn, statsModal, statsModalCloseBtn, faqBtn, faqModal, faqModalCloseBtn
 // 4. 核心功能函数定义
 // (保持你现有的这部分代码不变，直到 bindEventListeners)
 // ========================================================================
+
+
 async function syncWithCloudOnStartup() {
     if (syncDriveBtn.disabled) return; // 如果正在同步中，则不执行
 
@@ -1059,7 +1144,14 @@ function triggerAutoSync() {
         autoSyncTimer = null;
     }, AUTO_SYNC_DELAY);
 }
+function renderDailyQuote() {
+    const quoteContainer = document.getElementById('daily-quote-container');
+    if (!quoteContainer) return;
 
+    const dayOfYear = Math.floor((new Date() - new Date(new Date().getFullYear(), 0, 0)) / (1000 * 60 * 60 * 24));
+    const quoteIndex = dayOfYear % dailyQuotes.length;
+    quoteContainer.textContent = `"${dailyQuotes[quoteIndex]}"`;
+}
 
 function switchView(targetId) {
     document.querySelectorAll('.tab-item').forEach(item => {
@@ -5907,6 +5999,7 @@ if (!statsModal) {
     console.log("initializeApp: 事件监听器已绑定。");
 
     // 3. 加载非数据设置
+    renderDailyQuote();
     loadTheme();
     await loadNotificationSetting();
     console.log("initializeApp: 主题和通知设置已加载。");
