@@ -784,72 +784,76 @@ let statsBtn, statsModal, statsModalCloseBtn, faqBtn, faqModal, faqModalCloseBtn
 // (保持你现有的这部分代码不变，直到 bindEventListeners)
 // ========================================================================
 async function syncWithCloudOnStartup() {
-    if (syncDriveBtn.disabled) return; // Don't run if another sync is in progress
-    
-    console.log("Startup sync: Checking cloud for newer data.");
+    if (syncDriveBtn.disabled) return; // 如果正在同步中，则不执行
+
+    console.log("启动时同步：检查云端数据是否存在更新。");
     if (syncStatusSpan) syncStatusSpan.textContent = '检查云端...';
 
     try {
-        // findOrCreateFile will handle auth and return file metadata
+        // findOrCreateFile 会处理认证并返回文件元数据
         const fileMeta = await driveSync.findOrCreateFile();
         if (!fileMeta || !fileMeta.modifiedTime) {
-             console.log("Startup sync: No cloud file found or no modification time. Skipping download check.");
+             console.log("启动时同步：云端无文件或无修改时间，跳过下载检查。");
+             // 如果本地有数据，则上传初始化
+             if (Object.keys(allTasks).length > 0) {
+                 await driveSync.upload(allTasks);
+                 if (syncStatusSpan) syncStatusSpan.textContent = '已初始化云端数据！';
+             }
              return;
         }
 
-        const cloudModifiedTime = new Date(fileMeta.modifiedTime).getTime();
-        const localLastUpdate = allTasks.lastUpdatedLocal || 0;
         const cloudData = await driveSync.download();
         const todayString = getTodayString();
 
          // --- 智能同步逻辑 ---
         if (cloudData && typeof cloudData === 'object' && Object.keys(cloudData).length > 0) {
             
-            // 情况一：云端数据是今天的，说明其他设备已更新，直接覆盖本地
+            // 情况一：云端数据已经是今天的。这说明其他设备已更新，应直接覆盖本地。
             if (cloudData.lastDailyResetDate === todayString) {
-                console.log("启动时同步：云端数据已是最新，将覆盖本地。");
+                console.log("启动时同步：云端数据为最新，将覆盖本地。");
                 allTasks = cloudData;
-                await db.set('allTasks', allTasks);
-                renderAllLists();
+                await db.set('allTasks', allTasks); // 将云端最新数据存入本地DB
+                renderAllLists(); // 渲染UI
                 if (syncStatusSpan) syncStatusSpan.textContent = '已从云端更新！';
 
-            // 情况二：云端数据是昨天的（或更早），说明本设备是今天第一个启动的
+            // 情况二：云端数据是昨天的（或更早）。这说明本设备是今天第一个启动的。
             } else {
-                console.log("启动时同步：本设备为今日首次启动，将重置云端数据并同步。");
+                console.log("启动时同步：本设备为今日首次启动，将重置数据并同步。");
                 if (syncStatusSpan) syncStatusSpan.textContent = '为新的一天准备数据...';
 
                 // 1. 以云端数据为基础
                 let dataToReset = cloudData;
                 
-                // 2. 对其应用每日清理逻辑
-                // 这里我们直接复用 cleanupDailyTasks 的核心逻辑
+                // 2. 在此基础上应用每日清理逻辑 (复用 cleanupDailyTasks 的核心部分)
                 if (dataToReset.daily && dataToReset.daily.length > 0) {
                     const tasksToKeep = [];
                     dataToReset.daily.forEach(task => {
-                        if (task.fromFuture) return; // 移除过期的计划任务
-                        if (task.cycle === 'once' && task.creationDate !== todayString) return; // 移除过期的单次任务
+                        // 移除前一天来自“未来计划”的临时任务
+                        if (task.fromFuture) return; 
+                        // 移除已过期的“单次”任务
+                        if (task.cycle === 'once' && task.creationDate !== todayString) return; 
                         
-                        // 重置重复任务的状态
+                        // 重置重复任务的完成状态
                         if (task.completed) task.completed = false;
                         tasksToKeep.push(task);
                     });
                     dataToReset.daily = tasksToKeep;
                 }
-                dataToReset.lastDailyResetDate = todayString; // 更新日期戳
+                dataToReset.lastDailyResetDate = todayString; // 【关键】更新日期戳
                 
                 // 3. 将这份处理好的“今日新数据”作为权威数据
                 allTasks = dataToReset;
                 await db.set('allTasks', allTasks); // 保存到本地
                 renderAllLists(); // 刷新UI
 
-                // 4. 【关键】将这份新数据立即上传回云端
+                // 4. 【关键】将这份权威的新数据立即上传回云端
                 console.log("启动时同步：将重置后的今日数据上传回云端。");
                 await driveSync.upload(allTasks);
                 if (syncStatusSpan) syncStatusSpan.textContent = '新的一天，数据已同步！';
             }
 
         } else {
-            // 云端无数据或为空，说明是全新安装，本地数据（已在 `runAutomaticUpkeepTasks` 中重置）将成为权威版本
+            // 情况三：云端无数据或为空。说明是全新安装，本地数据（已在 `runAutomaticUpkeepTasks` 中重置）将成为权威版本
             console.log("启动时同步：云端无数据，将上传本地数据。");
             await driveSync.upload(allTasks);
             if (syncStatusSpan) syncStatusSpan.textContent = '已初始化云端数据！';
@@ -865,7 +869,7 @@ async function syncWithCloudOnStartup() {
         }
     } finally {
         setTimeout(() => {
-            if (syncStatusSpan && (syncStatusSpan.textContent.includes('更新') || syncStatusSpan.textContent.includes('失败'))) {
+            if (syncStatusSpan && (syncStatusSpan.textContent.includes('更新') || syncStatusSpan.textContent.includes('同步') || syncStatusSpan.textContent.includes('失败'))) {
                 syncStatusSpan.textContent = '';
             }
         }, 5000);
@@ -2901,46 +2905,40 @@ function cleanupDailyTasks() {
     const todayString = getTodayString();
     let hasChanged = false;
 
-    // 获取上次重置的日期，如果不存在则设为一个很早的日期
+    // 获取上次重置的日期，如果不存在则设为一个很早的日期，以确保首次运行时会执行
     const lastResetDate = allTasks.lastDailyResetDate || '1970-01-01';
     
-    // 只有在新的一天才执行清理和重置
+    // 【关键】只有在新的一天才执行清理和重置
     if (lastResetDate === todayString) {
-        return false; // 今天已经处理过了，直接返回
+        return false; // 今天已经处理过了，直接返回，不进行任何修改
     }
     
-    console.log(`New day detected. Cleaning and resetting daily tasks for ${todayString}.`);
+    console.log(`新的一天，为 ${todayString} 清理和重置每日任务。`);
 
     if (!allTasks.daily || allTasks.daily.length === 0) {
-        // 如果没有每日任务，只需更新日期标记
+        // 如果没有每日任务，只需更新日期标记即可
         allTasks.lastDailyResetDate = todayString;
-        return true; // 日期已更新，需要保存
+        return true; // 日期已更新，数据被视为“已更改”
     }
 
     const tasksToKeep = [];
     
     for (const task of allTasks.daily) {
-        // 1. 【核心修改】处理从未来计划移来的任务
-        // 只要带有 fromFuture 标记，第二天就直接移除，无论是否完成
+        // 1. 移除过期的、从未来计划移来的任务
         if (task.fromFuture) {
             hasChanged = true;
-            console.log(`Removing expired planned task: "${task.text}"`);
+            console.log(`移除过期的计划任务: "${task.text}"`);
             continue; // 跳过，不加入 tasksToKeep
         }
         
-        // 2. 处理不重复 ('once') 任务
-        // 这个逻辑与插件版不同，PWA版本中不重复任务在创建日之后即被移除
-        if (task.cycle === 'once') {
-            if (task.creationDate === todayString) {
-                tasksToKeep.push(task); // 是今天的，保留
-            } else {
-                hasChanged = true; // 过期了，不保留
-                console.log(`Removing one-time task: "${task.text}"`);
-            }
-            continue; // 'once' 任务处理完毕，进入下一轮循环
+        // 2. 移除过期的“不重复(once)”任务
+        if (task.cycle === 'once' && task.creationDate !== todayString) {
+            hasChanged = true;
+            console.log(`移除过期的单次任务: "${task.text}"`);
+            continue;
         }
 
-        // 3. 处理所有其他重复任务 ('daily', 'mon', 'tue', etc.)
+        // 3. 处理所有需要保留的重复任务
         // 重置它们的完成状态
         if (task.completed) {
             task.completed = false;
@@ -2956,7 +2954,7 @@ function cleanupDailyTasks() {
     allTasks.daily = tasksToKeep;
     allTasks.lastDailyResetDate = todayString;
     
-    // 只要是新的一天，lastDailyResetDate 就会更新，所以 hasChanged 至少为 true
+    // 只要是新的一天，lastDailyResetDate 就会更新，所以总是返回 true
     return true; 
 }
 function formatReminderDateTime(timestamp) {
