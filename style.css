@@ -1866,7 +1866,7 @@ body { padding-bottom: 80px; }
 
  /* --- 每日箴言卡片样式 (升级版) --- */
       .daily-quote {
-            padding: 25px 30px;
+            padding: 15px 15px;
             text-align: center;
             font-style: italic;
             font-size: 0.95em;
@@ -1903,4 +1903,24 @@ body { padding-bottom: 80px; }
     font-size: 0.9em;
     font-style: italic; /* 只让作者斜体 */
     color: var(--light-text-color);
+}
+
+/* 选择器：当 html 标签有 data-theme="dark" 属性时，应用以下样式 */
+[data-theme="dark"] .daily-quote {
+    /* 1. 改变背景和文字颜色 */
+    background: #2D3748; /* 一个柔和的深灰色，比纯黑更有质感 */
+    color: #e0e0e0;      /* 一个舒适的亮灰色，比纯白更护眼 */
+
+    /* 2. 调整阴影以适应深色背景 */
+    /* 我们使用一个非常深的、几乎看不见的阴影来提供层次感 */
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+    
+    /* 3. （可选）可以稍微调整边框颜色，使其在暗色模式下更和谐 */
+    /* border: 1px solid #444; */ /* 如果您想在暗色模式下也显示边框 */
+}
+
+/* 适配作者文本的颜色 */
+[data-theme="dark"] .daily-quote .quote-author {
+    /* 作者文本需要一个比正文稍暗的颜色来区分层次 */
+    color: #a0a0a0;
 }
