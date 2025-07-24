@@ -75,18 +75,6 @@ const db = (() => {
     };
 })();
 
-/**
- * 获取今天的日期字符串 (YYYY-MM-DD)
- * @returns {string}
- */
-function getTodayString() {
-    const today = new Date();
-    const year = today.getFullYear();
-    const month = String(today.getMonth() + 1).padStart(2, '0');
-    const day = String(today.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-}
-
 function robustJsonParse(content) {
     try {
         return JSON.parse(content);
@@ -126,41 +114,24 @@ The report should follow this structure:
 3.  **下阶段工作计划 (Next Steps)**:
     - Focus on tasks marked with "(status: uncompleted)".
     - List the most important upcoming tasks.
-4.  **关键指标回顾 (Key Metrics Review)**:
-    - For each metric provided, you MUST first list the raw data, analysis, and comparisons exactly as given.
-    - After listing the data, add a short, insightful summary.
-    - Your summary should interpret the comparisons. For example: "本期体重均值为74.5kg，环比下降0.5%，同比下降2.1%，显示出持续的、积极的下降趋势。"
-    - Or: "本月消费均值为150元，环比大幅增加30%，主要由于xx开销增多，需关注预算。"
-    - Be data-driven and professional in your summary.
-5.  **财务简报 (Financial Briefing)**: Summarize expenses if provided.
+4.  **财务简报 (Financial Briefing)**:
+    - If expense data is provided, briefly summarize it.
 
-Your tone should be professional, positive, and data-driven. Respond ONLY with the generated report content in Markdown format. Do not add any extra explanations.
+Your tone should be professional, positive, and encouraging. Respond ONLY with the generated report content in Markdown format. Do not add any extra explanations.
 `,
 
-    // 【核心修改】将 SYSTEM_PROMPT 变成一个动态获取的函数
-    getSystemPrompt: function() {
-        // 在这个函数被调用时，allTasks 肯定已经被初始化了
-        const metricsList = (allTasks.metrics && allTasks.metrics.definitions.length > 0)
-            ? allTasks.metrics.definitions.map(def => `- ${def.name}`).join('\n')
-            : '- No metrics defined.';
-
-        return `
+    SYSTEM_PROMPT: `
 You are an expert task parser for a to-do list application called "高效待办清单". Your job is to take a user's natural language input and convert it into a structured JSON object. You must ONLY return the JSON object, with no other text, explanations, or markdown formatting.
-The JSON object must have a "module" key and a "data" key. The "module" key must be one of "monthly", "future", "ledger", "daily", "metrics", or "unknown".
+The JSON object must have a "module" key and a "data" key. The "module" key must be one of "monthly", "future", "ledger", "daily", or "unknown".
 The "data" object structure depends on the module:
 1. If module is "monthly": {"text": (string), "tags": (array of strings), "priority": (number, 1-3)}
 2. If module is "future": {"text": (string), "reminder": (string, "YYYY-MM-DDTHH:mm")}
 3. If module is "ledger": {"date": (string, "YYYY-MM-DD"), "item": (string), "amount": (number), "payment": (string, optional)}
 4. If module is "daily": {"text": (string), "cycle": (string, 'daily'/'once'/'mon'...'sun')}
-5. If module is "metrics": {"date": (string, "YYYY-MM-DD"), "name": (string, exact metric name from provided list), "value": (number)}
 Today is ${getTodayString()}. The current year is ${new Date().getFullYear()}.
-
-The user has the following metrics defined. You MUST match the "name" exactly to one of these:
-${metricsList}
-
 ALWAYS return only the raw JSON.
-`;
-    },
+`,
+
      // --- 1. Key和模型选择的管理 ---
     // 【MODIFIED】Added 'deepseek'
     getKeys: () => ({
@@ -271,11 +242,6 @@ ALWAYS return only the raw JSON.
  * @param {string} reportType - e.g., 'daily_today', 'weekly_this', 'monthly_last'
  * @returns {{title: string, data: string} | null}
  */
-/**
- * 根据报告类型，准备要发送给AI的原始数据
- * @param {string} reportType - e.g., 'daily_today', 'weekly_this', 'monthly_last'
- * @returns {{title: string, data: string} | null}
- */
 function getReportData(reportType) {
     const now = new Date();
     let startDate, endDate;
@@ -284,34 +250,24 @@ function getReportData(reportType) {
 
     // 1. 根据 reportType 计算日期范围
     switch (reportType) {
-            case 'daily_today': {
+        case 'daily_today': { // 使用花括号创建块级作用域
             startDate = new Date(new Date().setHours(0, 0, 0, 0));
             endDate = new Date(new Date().setHours(23, 59, 59, 999));
-            // 日报的环比是昨天
-            prevStartDate = new Date(startDate); prevStartDate.setDate(startDate.getDate() - 1);
-            prevEndDate = new Date(endDate); prevEndDate.setDate(endDate.getDate() - 1);
-            // 日报的同比是去年今天
-            lastYearStartDate = new Date(startDate); lastYearStartDate.setFullYear(startDate.getFullYear() - 1);
-            lastYearEndDate = new Date(endDate); lastYearEndDate.setFullYear(endDate.getFullYear() - 1);
             title = `${getTodayString()} 工作日报`;
             isCurrentPeriod = true;
             break;
         }
-        case 'weekly_this': {
+
+        case 'weekly_this': { // 使用花括号创建块级作用域
             const currentDay = now.getDay();
             const firstDayOfWeek = now.getDate() - currentDay + (currentDay === 0 ? -6 : 1);
             startDate = new Date(new Date(now).setDate(firstDayOfWeek));
             startDate.setHours(0, 0, 0, 0);
-            endDate = new Date(startDate); endDate.setDate(startDate.getDate() + 6);
+            endDate = new Date(startDate);
+            endDate.setDate(startDate.getDate() + 6);
             endDate.setHours(23, 59, 59, 999);
-            // 周报环比是上周
-            prevStartDate = new Date(startDate); prevStartDate.setDate(startDate.getDate() - 7);
-            prevEndDate = new Date(endDate); prevEndDate.setDate(endDate.getDate() - 7);
-            // 周报同比是去年本周
-            lastYearStartDate = new Date(startDate); lastYearStartDate.setFullYear(startDate.getFullYear() - 1);
-            lastYearEndDate = new Date(endDate); lastYearEndDate.setFullYear(endDate.getFullYear() - 1);
             title = "本周工作周报";
-            isCurrentPeriod = true;
+            isCurrentPeriod = true; // 本周也是当前时段
             break;
         }
 
@@ -326,18 +282,19 @@ function getReportData(reportType) {
             title = "上周工作周报";
             break;
         }
-            
-        case 'monthly_this': {
+
+        case 'monthly_this': { // 使用花括号创建块级作用域
             startDate = new Date(now.getFullYear(), now.getMonth(), 1);
             endDate = new Date(new Date(now.getFullYear(), now.getMonth() + 1, 0).setHours(23, 59, 59, 999));
-             // 月报环比是上月
-            prevStartDate = new Date(startDate); prevStartDate.setMonth(startDate.getMonth() - 1);
-            prevEndDate = new Date(endDate); prevEndDate.setDate(0); prevEndDate.setHours(23, 59, 59, 999);
-             // 月报同比是去年本月
-            lastYearStartDate = new Date(startDate); lastYearStartDate.setFullYear(startDate.getFullYear() - 1);
-            lastYearEndDate = new Date(endDate); lastYearEndDate.setFullYear(endDate.getFullYear() - 1);
             title = "本月工作月报";
             isCurrentPeriod = true;
+            break;
+        }
+            
+        case 'monthly_last': { // 使用花括号创建块级作用域
+            startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+            endDate = new Date(new Date(now.getFullYear(), now.getMonth(), 0).setHours(23, 59, 59, 999));
+            title = "上月工作月报";
             break;
         }
 
@@ -690,7 +647,6 @@ async function handleGoogleAuthCallback() {
     }
 }
 
-
 // ========================================================================
 // 2. 状态变量和常量定义
 // (保持你现有的这部分代码不变)
@@ -701,7 +657,6 @@ let currentTheme = 'light';
 let notificationsEnabled = true;
 let selectedLedgerMonth = 'current';
 let selectedMonthlyDisplayMonth = 'current';
-let selectedMetricsDisplayMonth = 'current';
 let currentMonthlyTagFilter = 'all';
 let currentLedgerFilter = 'all';
 let historyModalFor = null;
@@ -718,9 +673,6 @@ let aiSettingsBtn, aiAssistantBtn, aiAssistantModal, aiAssistantCloseBtn,
     reportOptionsGrid, aiReportOutput, aiReportTitle, 
     aiReportLoading, aiReportContent, aiReportCopyBtn, aiReportBackBtn;
 // --- END OF REPLACEMENT ---
-
-let activeMetricProjectId = null;
-let metricsChartInstance = null;
 
 const AUTO_SYNC_DELAY = 5000; // 延迟5秒 (5000毫秒)
 const faqs = [
@@ -909,10 +861,6 @@ const dailyQuotes = [
 // (保持你现有的这部分代码不变)
 // ========================================================================
 let statsBtn, statsModal, statsModalCloseBtn, faqBtn, faqModal, faqModalCloseBtn, faqListDiv, mainSearchInput, dailyTitleDate, themeToggleBtn, feedbackBtn, donateBtn, dailyTaskList, monthlyTaskList, futureTaskList, ledgerList, monthlyHeaderTitle, sortMonthlyByPriorityBtn, ledgerHeaderTitle, monthlyInputArea, ledgerInputArea, newDailyTaskInput, addDailyTaskBtn, newMonthlyTaskInput, newMonthlyTagsInput, addMonthlyTaskBtn, newFutureTaskInput, futureTaskDateTimeInput, addFutureTaskBtn, ledgerDateInput, ledgerItemInput, ledgerAmountInput, ledgerPaymentInput, ledgerDetailsInput, addLedgerBtn, monthlyTagsContainer, ledgerTagsContainer, ledgerSummaryContainer, monthlyHistoryBtn, ledgerHistoryBtn, historyModal, historyModalCloseBtn, historyModalTitle, historyPrevYearBtn, historyNextYearBtn, historyCurrentYearSpan, historyMonthsGrid, donateModal, modalCloseBtn, featuresBtn, featuresModal, featuresModalCloseBtn, featuresListUl, exportMonthlyHistoryBtn, importMonthlyBtn, downloadMonthlyTemplateBtn, importMonthlyFileInput, exportLedgerHistoryBtn, importLedgerBtn, downloadLedgerTemplateBtn, importLedgerFileInput, toggleNotificationsBtn, customPromptModal, customPromptTitleEl, customPromptMessageEl, customPromptInputContainer, customPromptConfirmBtn, customPromptCancelBtn, customPromptCloseBtn, setBudgetBtn, annualReportBtn, annualReportModal, annualReportCloseBtn, annualReportTitle, annualReportPrevYearBtn, annualReportNextYearBtn, annualReportCurrentYearSpan, annualReportSummaryDiv, annualReportDetailsDiv, currencyPickerBtn, syncDriveBtn, syncStatusSpan, bottomNav, allSections, isHistoryModalOpen;
-let viewSwitcher, showTasksViewBtn, showMetricsViewBtn, dailyTasksView, dailyMetricsView,
-    metricsControls, metricsSettingsBtn, metricsProjectPills, metricsChartContainer,
-    chartTimeDimension, refreshChartBtn, metricsChartCanvas, metricsDataTableContainer,
-    metricsInitialSetupPrompt, goToMetricsSettingsBtn;
 
 // ========================================================================
 // 4. 核心功能函数定义
@@ -1130,491 +1078,20 @@ async function loadTasks(callback) {
     
     if (data && typeof data === 'object') {
         allTasks = data;
-        const defaultStructure = { daily: [], monthly: [], future: [], ledger: [], history: {}, ledgerHistory: {}, budgets: {}, currencySymbol: '$', lastUpdatedLocal: 0, lastDailyResetDate: '1970-01-01', metrics: { projects: [], definitions: [], data: {} } };
+        const defaultStructure = { daily: [], monthly: [], future: [], ledger: [], history: {}, ledgerHistory: {}, budgets: {}, currencySymbol: '$', lastUpdatedLocal: 0, lastDailyResetDate: '1970-01-01' };
         for (const key in defaultStructure) {
             if (!allTasks.hasOwnProperty(key)) {
                 allTasks[key] = defaultStructure[key];
             }
         }
     } else {
-        allTasks = { daily: [], monthly: [], future: [], ledger: [], history: {}, ledgerHistory: {}, budgets: {}, currencySymbol: '$', lastUpdatedLocal: 0, lastDailyResetDate: '1970-01-01', metrics: { projects: [], definitions: [], data: {} } };
+        allTasks = { daily: [], monthly: [], future: [], ledger: [], history: {}, ledgerHistory: {}, budgets: {}, currencySymbol: '$', lastUpdatedLocal: 0, lastDailyResetDate: '1970-01-01' };
         await saveTasks();
     }
     if (callback) callback();
 }
 
-function renderDailySection() {
-    const isMetricsView = showMetricsViewBtn.classList.contains('active');
 
-    dailyTasksView.classList.toggle('hidden', isMetricsView);
-    dailyMetricsView.classList.toggle('hidden', !isMetricsView);
-    metricsControls.style.display = isMetricsView ? 'flex' : 'none';
-
-    if (isMetricsView) {
-        renderMetricsView();
-    } else {
-        // 【核心修正】在渲染任务视图时，应用搜索过滤
-        const searchActive = currentSearchTerm.length > 0;
-        const dailyDataToRender = searchActive
-            ? allTasks.daily.filter(task => 
-                task.text.toLowerCase().includes(currentSearchTerm) ||
-                (task.note && task.note.toLowerCase().includes(currentSearchTerm))
-              )
-            : allTasks.daily;
-        renderDailyTasks(dailyDataToRender);
-    }
-}
-
-function renderMetricsView() {
-    // 1. 从主数据源获取项目和指标的定义
-    const { projects, definitions } = allTasks.metrics;
-
-    // 2. 检查是否存在任何已定义的指标。如果没有，则显示初始设置提示。
-    if (projects.length === 0 || definitions.length === 0) {
-        metricsInitialSetupPrompt.classList.remove('hidden');
-        metricsProjectPills.classList.add('hidden');
-        metricsChartContainer.classList.add('hidden');
-        metricsDataTableContainer.classList.add('hidden');
-        return;
-    }
-
-    // 3. 如果有数据，则隐藏初始设置提示，并显示主UI组件
-    metricsInitialSetupPrompt.classList.add('hidden');
-    metricsProjectPills.classList.remove('hidden');
-    metricsChartContainer.classList.remove('hidden');
-    metricsDataTableContainer.classList.remove('hidden');
-
-    // 4. 初始化或确保当前有一个被选中的项目ID
-    if (!activeMetricProjectId && projects.length > 0) {
-        activeMetricProjectId = projects[0].id;
-    }
-
-    // 5. 【核心修复】使用 requestAnimationFrame 推迟渲染
-    // 这可以确保浏览器在执行 DOM 操作前，已经完成了对新显示元素的样式计算和绘制
-    requestAnimationFrame(() => {
-        // a. 填充并同步时间维度下拉菜单的状态
-        populateHistoryMonthsSelector(); 
-        
-        // b. 渲染顶部的项目筛选胶囊按钮
-        renderMetricProjectPills();
-        
-        // c. 渲染数据输入表格
-        renderMetricsDataTable();
-        
-        // d. 渲染折线图
-        renderMetricsChart();
-    });
-}
-
-function renderMetricProjectPills() {
-    metricsProjectPills.innerHTML = '';
-    allTasks.metrics.projects.forEach(proj => {
-        const btn = document.createElement('button');
-        btn.className = 'tag-button';
-        btn.textContent = proj.name;
-        btn.dataset.projectId = proj.id;
-        if (proj.id === activeMetricProjectId) {
-            btn.classList.add('active');
-        }
-        btn.addEventListener('click', () => {
-            activeMetricProjectId = proj.id;
-            renderMetricsView();
-        });
-        metricsProjectPills.appendChild(btn);
-    });
-}
-
-function renderMetricsDataTable() {
-    const timeDimension = document.getElementById('chart-time-dimension').value;
-const metricsForProject = allTasks.metrics.definitions.filter(def => def.projectId === activeMetricProjectId);
-    if (metricsForProject.length === 0) {
-        metricsDataTableContainer.innerHTML = '<p style="text-align:center; color: var(--light-text-color);">此项目下无指标，请在设置中添加。</p>';
-        return;
-    }
-
-    let year, month, daysInMonth;
-    
-    if (timeDimension.match(/^\d{4}-\d{2}$/)) { // 如果是 "YYYY-MM" 格式的历史月份
-        const parts = timeDimension.split('-');
-        year = parseInt(parts[0], 10);
-        month = parseInt(parts[1], 10) - 1;
-    } else { // 否则，视为查看当月 ('current')
-        const today = new Date();
-        year = today.getFullYear();
-        month = today.getMonth();
-    }
-    
-    daysInMonth = new Date(year, month + 1, 0).getDate();
-    
-    // 【核心修正3】修改表头生成逻辑
-    let tableHTML = '<table class="metrics-table"><thead><tr><th>指标</th>';
-    for (let i = 1; i <= daysInMonth; i++) {
-        // 将纯数字 'i' 替换为 'MM-DD' 格式
-        const dayStr = String(i).padStart(2, '0');
-        const monthStr = String(month + 1).padStart(2, '0');
-        tableHTML += `<th>${monthStr}-${dayStr}</th>`;
-    }
-    tableHTML += '</tr></thead><tbody>';
-
-    const currentMonthStr = `${year}-${String(month + 1).padStart(2, '0')}`;
-
-    metricsForProject.forEach(metric => {
-        tableHTML += `<tr><td class="metric-name-cell">${metric.name}<span class="unit">(${metric.unit})</span></td>`;
-        for (let i = 1; i <= daysInMonth; i++) {
-            const dateStr = `${currentMonthStr}-${String(i).padStart(2, '0')}`;
-            const dataEntry = (allTasks.metrics.data[metric.id] || []).find(d => d.date === dateStr);
-            const value = dataEntry ? dataEntry.value : '';
-            // 数据单元格的逻辑保持不变
-            tableHTML += `<td><input type="number" class="metric-value-input" data-metric-id="${metric.id}" data-date="${dateStr}" value="${value}" step="any"></td>`;
-        }
-        tableHTML += '</tr>';
-    });
-
-    tableHTML += '</tbody></table>';
-    metricsDataTableContainer.innerHTML = tableHTML;
-}
-
-/**
- * 渲染折线图
- */
-function renderMetricsChart() {
-    if (metricsChartInstance) {
-        metricsChartInstance.destroy();
-        metricsChartInstance = null;
-    }
-    
-    const metricsForProject = allTasks.metrics.definitions.filter(def => def.projectId === activeMetricProjectId);
-    if (metricsForProject.length === 0) {
-        metricsChartContainer.classList.add('hidden');
-        return;
-    } else {
-        metricsChartContainer.classList.remove('hidden');
-    }
-
-    // 【核心修正】调用时只传递一个参数
-    const { labels, datasetsData } = prepareChartData(metricsForProject);
-
-    const chartColors = ['#3B82F6', '#14B8A6', '#F59E0B', '#8B5CF6', '#EF4444', '#6366F1'];
-
-    const datasets = metricsForProject.map((metric, index) => {
-        const color = chartColors[index % chartColors.length];
-        return {
-            label: `${metric.name} (${metric.unit})`,
-            data: datasetsData[metric.id],
-            borderColor: color,
-            backgroundColor: color + '33',
-            fill: false,
-            tension: 0.1,
-            spanGaps: true,
-        };
-    });
-
-    if (!metricsChartCanvas) {
-        console.error("图表渲染失败: 找不到 canvas 元素。");
-        return;
-    }
-    const ctx = metricsChartCanvas.getContext('2d');
-    if (!ctx) {
-        console.error("图表渲染失败: 无法获取 canvas 的 2D 上下文。");
-        return;
-    }
-
-    metricsChartInstance = new Chart(ctx, {
-        type: 'line',
-        data: {
-            labels: labels,
-            datasets: datasets
-        },
-        options: {
-            responsive: true,
-            maintainAspectRatio: false,
-            scales: {
-                x: {
-                    grid: { color: 'rgba(128, 128, 128, 0.1)' },
-                    ticks: { color: 'var(--light-text-color)' }
-                },
-                y: {
-                    grid: { color: 'rgba(128, 128, 128, 0.1)' },
-                    ticks: { color: 'var(--light-text-color)' },
-                    beginAtZero: true
-                }
-            },
-            plugins: {
-                legend: {
-                    position: 'top',
-                    labels: { color: 'var(--text-color)' }
-                }
-            }
-        }
-    });
-}
-
-function prepareChartData(metrics) { // 【核心修正】移除了第二个参数 'timeDimension'
-    const timeDimension = document.getElementById('chart-time-dimension').value;
-    const labels = [];
-    const datasetsData = {};
-    metrics.forEach(m => { datasetsData[m.id] = []; });
-
-    let startDate, endDate;
-    
-    // --- 1. 根据时间维度，确定处理方式和标签 ---
-    if (timeDimension.match(/^\d{4}-\d{2}$/)) { // 历史月份视图，例如 "2024-05"
-        const parts = timeDimension.split('-');
-        const year = parseInt(parts[0], 10);
-        const month = parseInt(parts[1], 10) - 1;
-        startDate = new Date(year, month, 1);
-        endDate = new Date(year, month + 1, 0);
-
-        let currentDate = new Date(startDate);
-        while (currentDate <= endDate) {
-            labels.push(currentDate.toISOString().split('T')[0]);
-            currentDate.setDate(currentDate.getDate() + 1);
-        }
-
-    } else if (timeDimension === 'last30') { // 近30天视图
-        endDate = new Date();
-        startDate = new Date();
-        startDate.setDate(endDate.getDate() - 29);
-
-        let currentDate = new Date(startDate);
-        while (currentDate <= endDate) {
-            labels.push(currentDate.toISOString().split('T')[0]);
-            currentDate.setDate(currentDate.getDate() + 1);
-        }
-
-    } else if (timeDimension === 'currentYear') { // 当年视图
-        const year = new Date().getFullYear();
-        
-        for (let i = 0; i < 12; i++) {
-            labels.push(`${year}-${String(i + 1).padStart(2, '0')}`);
-        }
-
-        metrics.forEach(metric => {
-            const metricData = allTasks.metrics.data[metric.id] || [];
-            
-            labels.forEach(monthLabel => {
-                const valuesInMonth = metricData
-                    .filter(d => d.date.startsWith(monthLabel))
-                    .map(d => d.value);
-
-                if (valuesInMonth.length > 0) {
-                    const sum = valuesInMonth.reduce((acc, val) => acc + val, 0);
-                    const avg = sum / valuesInMonth.length;
-                    datasetsData[metric.id].push(parseFloat(avg.toFixed(2)));
-                } else {
-                    datasetsData[metric.id].push(null);
-                }
-            });
-        });
-        
-        return { labels, datasetsData };
-
-    } else { // 默认是 'currentMonth' (当月视图)
-        const today = new Date();
-        const year = today.getFullYear();
-        const month = today.getMonth();
-        startDate = new Date(year, month, 1);
-        endDate = new Date(year, month + 1, 0);
-
-        let currentDate = new Date(startDate);
-        while (currentDate <= endDate) {
-            labels.push(currentDate.toISOString().split('T')[0]);
-            currentDate.setDate(currentDate.getDate() + 1);
-        }
-    }
-
-    // --- 2. 为所有按“日”查看的视图填充数据 ---
-    labels.forEach(dateStr => {
-        metrics.forEach(metric => {
-            const entry = (allTasks.metrics.data[metric.id] || []).find(d => d.date === dateStr);
-            datasetsData[metric.id].push(entry ? entry.value : null);
-        });
-    });
-
-    return { labels, datasetsData };
-}
-
-
-function openMetricsSettingsModal() {
-    
-    // 我们将所有逻辑都放在 onRender 回调中，以确保 DOM 元素都已存在
-    const onModalRender = () => {
-        const modalContent = document.querySelector('#custom-prompt-modal .modal-content');
-        const contentContainer = document.querySelector('#custom-prompt-modal .custom-prompt-input-area');
-        const cancelButton = document.getElementById('custom-prompt-cancel-btn');
-
-        if (!modalContent || !contentContainer || !cancelButton) {
-            console.error("指标设置模态框的关键元素未找到！");
-            return;
-        }
-
-        // --- 内部函数 1: 刷新模态框内容 ---
-        const refreshContent = () => {
-            let html = '<div class="metrics-settings-content">';
-            // ... (HTML 生成逻辑保持不变)
-            (allTasks.metrics.projects || []).forEach(proj => {
-                html += `<div class="metric-project-group">
-                    <div class="metric-project-header">
-                        <h4>${proj.name}</h4>
-                        <button class="action-btn delete-btn" data-project-id="${proj.id}" title="删除此项目">×</button>
-                    </div>
-                    <ul class="metric-list">`;
-                (allTasks.metrics.definitions || []).filter(def => def.projectId === proj.id).forEach(metric => {
-                    html += `<li class="metric-list-item"><span>${metric.name} (${metric.unit})</span><button class="action-btn delete-btn" data-metric-id="${metric.id}" title="删除此指标">×</button></li>`;
-                });
-                html += `</ul>
-                    <div class="input-area" style="margin-top: 15px;">
-                        <input type="text" class="new-metric-name-input" placeholder="新指标名称..." data-project-id="${proj.id}">
-                        <input type="text" class="new-metric-unit-input" placeholder="单位(如:kg)" data-project-id="${proj.id}">
-                        <button class="add-metric-btn" data-project-id="${proj.id}">+</button>
-                    </div>
-                </div>`;
-            });
-            html += `</div>
-            <div class="input-area" style="margin-top: 20px; border-top: 1px solid var(--card-border-color); padding-top: 20px;">
-                 <input type="text" id="new-metric-project-input" placeholder="添加新项目...">
-                 <button id="add-metric-project-btn">+</button>
-            </div>`;
-            contentContainer.innerHTML = html;
-        };
-
-        // --- 内部函数 2: 处理内部点击事件 ---
-        const handleInternalClicks = (e) => {
-            const button = e.target.closest('button');
-            if (!button) return;
-
-            e.stopPropagation(); // 阻止事件冒泡
-
-            if (button.classList.contains('add-metric-btn')) {
-                const projectId = button.dataset.projectId;
-                const nameInput = contentContainer.querySelector(`.new-metric-name-input[data-project-id="${projectId}"]`);
-                const unitInput = contentContainer.querySelector(`.new-metric-unit-input[data-project-id="${projectId}"]`);
-                if (nameInput && unitInput && nameInput.value.trim() && unitInput.value.trim()) {
-                    allTasks.metrics.definitions.push({ id: `m_${Date.now()}`, projectId, name: nameInput.value.trim(), unit: unitInput.value.trim() });
-                    saveTasks().then(refreshContent);
-                }
-            } else if (button.classList.contains('delete-btn')) {
-                const metricId = button.dataset.metricId;
-                const projectId = button.dataset.projectId;
-                if (metricId) {
-                    allTasks.metrics.definitions = allTasks.metrics.definitions.filter(d => d.id !== metricId);
-                    delete allTasks.metrics.data[metricId];
-                } else if (projectId) {
-                    allTasks.metrics.projects = allTasks.metrics.projects.filter(p => p.id !== projectId);
-                    allTasks.metrics.definitions = allTasks.metrics.definitions.filter(d => d.projectId !== projectId);
-                }
-                saveTasks().then(refreshContent);
-            } else if (button.id === 'add-metric-project-btn') {
-                const input = document.getElementById('new-metric-project-input');
-                if (input && input.value.trim()) {
-                    allTasks.metrics.projects.push({ id: `proj_${Date.now()}`, name: input.value.trim() });
-                    saveTasks().then(refreshContent);
-                }
-            }
-        };
-
-        // --- 核心逻辑 ---
-        
-        // 1. 填充初始内容
-        refreshContent();
-
-        // 2. 为内部动态内容绑定事件监听器
-        contentContainer.addEventListener('click', handleInternalClicks);
-        
-        // 3. 【关键修复】手动为“完成”按钮绑定一次性事件
-        const handleFinishClick = () => {
-            renderMetricsView(); // 刷新主界面
-            closeCustomPrompt(); // 手动关闭模态框
-            
-            // 清理事件，防止内存泄漏
-            contentContainer.removeEventListener('click', handleInternalClicks);
-            cancelButton.removeEventListener('click', handleFinishClick);
-        };
-        cancelButton.addEventListener('click', handleFinishClick);
-        
-        // 确保模态框的关闭按钮也能触发同样的逻辑
-        const closeBtn = document.getElementById('custom-prompt-close-btn');
-        if(closeBtn) {
-            closeBtn.onclick = handleFinishClick;
-        }
-    };
-
-    // --- 主调用 ---
-    openCustomPrompt({
-        title: '项目与指标设置',
-        htmlContent: '<div class="custom-prompt-input-area"></div>', // 仅提供一个空的容器
-        hideConfirmButton: true,
-        cancelText: '完成',
-        onCancel: null, // 【重要】将 onCancel 设为 null，我们自己接管
-        onConfirm: null,
-        onRender: onModalRender // 所有逻辑都在 onRender 中执行
-    });
-}
-
-
-function saveMetricValue(metricId, date, value) {
-    if (!allTasks.metrics.data[metricId]) {
-        allTasks.metrics.data[metricId] = [];
-    }
-
-    const dataIndex = allTasks.metrics.data[metricId].findIndex(d => d.date === date);
-    const numericValue = parseFloat(value);
-
-    if (isNaN(numericValue) || value.trim() === '') {
-        if (dataIndex > -1) {
-            allTasks.metrics.data[metricId].splice(dataIndex, 1);
-        }
-    } else {
-        if (dataIndex > -1) {
-            allTasks.metrics.data[metricId][dataIndex].value = numericValue;
-        } else {
-            allTasks.metrics.data[metricId].push({ date, value: numericValue });
-        }
-    }
-    
-    // 【核心修改】不再调用 renderMetricsChart()，只调用 saveTasks()
-    saveTasks();
-}
-
-function populateHistoryMonthsSelector() {
-    const selector = document.getElementById('chart-time-dimension');
-    if (!selector) return;
-
-    selector.querySelectorAll('option[data-history-month], option[disabled]').forEach(opt => opt.remove());
-
-    const monthsWithData = new Set();
-    if (allTasks.metrics && allTasks.metrics.data) {
-        Object.values(allTasks.metrics.data).flat().forEach(entry => {
-            monthsWithData.add(entry.date.substring(0, 7));
-        });
-    }
-
-    const sortedMonths = Array.from(monthsWithData).sort().reverse();
-    
-    if (sortedMonths.length > 0) {
-        const separator = document.createElement('option');
-        separator.disabled = true;
-        separator.textContent = '──────────';
-        selector.appendChild(separator);
-
-        sortedMonths.forEach(monthKey => {
-            const option = document.createElement('option');
-            option.value = monthKey;
-            option.textContent = `${monthKey} (历史)`;
-            option.dataset.historyMonth = true;
-            selector.appendChild(option);
-        });
-    }
-
-    const targetValue = selectedMetricsDisplayMonth === 'current' ? 'currentMonth' : selectedMetricsDisplayMonth;
-    
-    if (selector.querySelector(`option[value="${targetValue}"]`)) {
-        selector.value = targetValue;
-    } else {
-        selector.value = 'currentMonth';
-        selectedMetricsDisplayMonth = 'current';
-    }
-}
 
 async function saveTasks() {
     allTasks.lastUpdatedLocal = Date.now();
@@ -2002,7 +1479,7 @@ function renderAllLists() {
           ) 
         : baseLedgerData;
 
-    renderDailySection();
+    renderDailyTasks(dailyData);
     renderMonthlyTasks(monthlyData, selectedMonthlyDisplayMonth !== 'current');
     renderMonthlyTags(monthlyData);
     renderFutureTasks(futureData);
@@ -3514,18 +2991,7 @@ function renderLedgerSummary(dataToRender) {
         ledgerSummaryBreakdown.appendChild(itemDiv);
     });
 }
-/**
- * 获取今天的日期字符串 (YYYY-MM-DD)
- * @returns {string}
- */
-function getTodayString() {
-    const today = new Date();
-    const year = today.getFullYear();
-    const month = String(today.getMonth() + 1).padStart(2, '0');
-    const day = String(today.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-}
-
+function getTodayString() { const today = new Date(); const year = today.getFullYear(); const month = String(today.getMonth() + 1).padStart(2, '0'); const day = String(today.getDate()).padStart(2, '0'); return `${year}-${month}-${day}`; }
 // --- START OF REPLACEMENT ---
 function cleanupDailyTasks() {
     const todayString = getTodayString();
@@ -3896,56 +3362,6 @@ function exitSortMode() {
     if (highlightedItem) { highlightedItem.classList.remove('is-sorting'); }
 }
 
-async function handleNotionCallback() {
-    const urlParams = new URLSearchParams(window.location.search);
-    const authCode = urlParams.get('code');
-
-    if (authCode) {
-        // 使用一个固定的、权威的PWA URL来清理地址栏
-        const PWA_URL = 'https://alanlinzw.github.io/'; // 你的PWA的固定URL
-        window.history.replaceState({}, document.title, PWA_URL);
-
-        // 显示加载提示
-        openCustomPrompt({
-            title: "正在完成Notion授权...",
-            message: "请稍候，正在通过安全代理验证您的授权信息。",
-            inputType: 'none',
-            hideConfirmButton: true,
-            hideCancelButton: true
-        });
-
-        try {
-            // 定义你的Worker代理URL
-            const PROXY_URL = 'https://notion-auth-proxy.martinlinzhiwu.workers.dev/exchange-token';
-
-            // 通过代理，使用POST方法在请求体中发送code
-            const response = await fetch(PROXY_URL, {
-                method: "POST",
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ code: authCode })
-            });
-
-            const tokenData = await response.json();
-
-            // 检查代理返回的响应是否成功
-            if (!response.ok || tokenData.error) {
-                throw new Error(tokenData.error || "从代理服务器获取Token失败。请检查Worker日志。");
-            }
-            
-            // 存储获取到的token
-            await db.set('notion_access_token', tokenData.access_token);
-            await db.set('notion_workspace_id', tokenData.workspace_id);
-            
-            // 关闭加载提示，进入下一步：选择页面
-            closeCustomPrompt();
-            await selectNotionParentPage(true); // 传入true表示这是首次设置
-
-        } catch (error) {
-            closeCustomPrompt();
-            openCustomPrompt({ title: "Notion授权失败", message: error.message, inputType: 'none', confirmText: '好的' });
-        }
-    }
-}
 
 async function updateNotificationButtonUI() {
     if (!toggleNotificationsBtn) return;
@@ -4795,10 +4211,9 @@ async function handleAiProcess() {
     aiProcessBtn.disabled = true;
     aiAddLoading.classList.remove('hidden'); 
 
-try {
-        // 【核心修改】将 aiAssistant.SYSTEM_PROMPT 改为 aiAssistant.getSystemPrompt()
-        const systemPrompt = aiAssistant.getSystemPrompt();
-        const parsedData = await aiAssistant.generateAIResponse(userInput, systemPrompt);
+    try {
+        // 使用通用的 generateAIResponse 函数和默认的 SYSTEM_PROMPT
+        const parsedData = await aiAssistant.generateAIResponse(userInput, aiAssistant.SYSTEM_PROMPT);
         if (parsedData) {
            aiPromptInput.value = ''; // 清空输入
             closeModal(aiAssistantModal); // **先关闭**AI助手模态框
@@ -5312,6 +4727,515 @@ async function executeNotionExport() {
     }
 }
 
+
+let GAPI_INSTANCE = null;
+let GIS_OAUTH2_INSTANCE = null;
+
+// ========================================================================
+// 8. 应用初始化
+// ========================================================================
+function bindEventListeners() {
+ 
+// 建议添加到 bindEventListeners 函数中
+let syncTimeout = null;
+const triggerSync = () => {
+    // 使用防抖，避免短时间内（如快速切换窗口）重复触发
+    clearTimeout(syncTimeout);
+    syncTimeout = setTimeout(() => {
+        if (isDataDirty) { 
+            console.log('Visibility change detected and data is dirty, triggering auto-sync.');
+            const syncButton = document.getElementById('sync-drive-btn');
+            if (syncButton && !syncButton.disabled) {
+                syncButton.click();
+            }
+        } else {
+            console.log('Visibility change detected, but data is clean. Skipping sync.');
+        }
+    }, 1000); 
+};
+
+// 当页面变为可见时触发同步
+window.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+        triggerSync();
+    }
+});
+
+// 当窗口获得焦点时也触发（作为补充）
+window.addEventListener('focus', triggerSync);
+
+ if (syncDriveBtn && syncStatusSpan) {
+    syncDriveBtn.addEventListener('click', async () => {
+        // Stop any pending auto-sync
+        if (autoSyncTimer) {
+            clearTimeout(autoSyncTimer);
+            autoSyncTimer = null;
+        }
+
+        console.log("Manual sync: Pushing local data to cloud.");
+        syncStatusSpan.textContent = '准备同步...';
+        syncDriveBtn.disabled = true;
+
+        try {
+            // This will automatically handle getting a valid token or prompting for re-auth
+            await driveSync.findOrCreateFile();
+
+            if (!isDataDirty) {
+                console.log("Manual sync: No local changes to push.");
+                syncStatusSpan.textContent = '数据已是最新';
+                setTimeout(() => { if(syncStatusSpan.textContent === '数据已是最新') syncStatusSpan.textContent = ''; }, 3000);
+                return; // Exit early if there's nothing to sync
+            }
+
+            syncStatusSpan.textContent = '正在上传...';
+            await driveSync.upload(allTasks);
+
+            // --- Success Logic ---
+            isDataDirty = false;
+            updateSyncIndicator(); // This will show '已同步'
+            const timeString = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            localStorage.setItem('lastSyncTime', timeString);
+            syncStatusSpan.textContent = `已于 ${timeString} 同步`;
+            setTimeout(() => {
+                // Clear the success message after a few seconds
+                 if (syncStatusSpan.textContent.includes('同步')) {
+                    syncStatusSpan.textContent = '';
+                 }
+            }, 7000);
+
+        } catch (error) {
+            console.error("Manual sync failed:", error);
+            const errorMessage = error.message || '未知错误';
+            if (error.message !== "REAUTH_REQUIRED") { // The prompt is already shown by gapiClientRequest
+                syncStatusSpan.textContent = `同步错误: ${errorMessage.substring(0, 40)}...`;
+            }
+        } finally {
+            // This block ALWAYS runs
+            syncDriveBtn.disabled = false;
+        }
+    });
+}
+
+const exportToNotionBtn = document.getElementById('export-to-notion-btn');
+if (exportToNotionBtn) {
+    exportToNotionBtn.addEventListener('click', handleExportToNotionClick);
+}
+
+// 【新增】绑定备份与恢复的事件
+    if (backupRestoreBtn) {
+        backupRestoreBtn.addEventListener('click', () => {
+            openCustomPrompt({
+                title: '备份与恢复',
+                message: '您可以下载完整备份文件，或从每日自动快照中恢复。',
+                htmlContent: `
+                    <div class="custom-prompt-actions" style="flex-direction: column; gap: 10px;">
+                        <button id="backup-btn" class="custom-prompt-btn custom-prompt-confirm">备份当前数据到文件</button>
+                        <button id="restore-btn" class="custom-prompt-btn">从文件恢复...</button>
+                        <button id="view-history-btn" class="custom-prompt-btn">查看历史快照...</button>
+                    </div>
+                `,
+                hideConfirmButton: true,
+                hideCancelButton: true,
+                onRender: () => {
+                    document.getElementById('backup-btn').onclick = () => { handleBackup(); closeCustomPrompt(); };
+                    document.getElementById('restore-btn').onclick = () => { closeCustomPrompt(); restoreFileInput.click(); };
+                    document.getElementById('view-history-btn').onclick = () => { closeCustomPrompt(); showVersionHistoryModal(); };
+                }
+            });
+        });
+    }
+
+// 监听文件选择框的变化，用于恢复
+if (restoreFileInput) {
+    restoreFileInput.addEventListener('change', (event) => {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+        reader.onload = (e) => {
+            try {
+                const restoredData = JSON.parse(e.target.result);
+                // 验证数据基本结构
+                if (restoredData && restoredData.monthly && restoredData.daily) {
+                    // 数据看似有效，打开最终确认恢复的模态框
+                    showRestoreConfirmation(restoredData);
+                } else {
+                    throw new Error('文件格式无效或不包含预期数据。');
+                }
+            } catch (error) {
+                openCustomPrompt({
+                    title: '恢复失败',
+                    message: `无法解析备份文件。请确保文件未损坏且格式正确。\n错误: ${error.message}`,
+                    inputType: 'none',
+                    confirmText: '好的',
+                    hideCancelButton: true
+                });
+            }
+        };
+        reader.readAsText(file);
+        // 重置文件输入框，以便下次能选择同一个文件
+        event.target.value = '';
+    });
+}
+
+if (versionHistoryCloseBtn) versionHistoryCloseBtn.addEventListener('click', hideVersionHistoryModal);
+if (versionHistoryModal) versionHistoryModal.addEventListener('click', (e) => {
+    if(e.target === versionHistoryModal) hideVersionHistoryModal();
+});
+
+   if (bottomNav) {
+        bottomNav.addEventListener('click', (e) => {
+            const tab = e.target.closest('.tab-item');
+            if (!tab || !tab.dataset.section) return; 
+            e.preventDefault();
+            switchView(tab.dataset.section);
+        });
+    }
+
+    const allModals = document.querySelectorAll('.modal-overlay');
+    allModals.forEach(modal => {
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) { 
+                closeModal(modal);
+                if (modal === customPromptModal && typeof currentPromptConfig.onCancel === 'function') {
+                    currentPromptConfig.onCancel(); 
+                }
+                if (modal === annualReportModal) closeAnnualReportModal(); 
+            }
+        });
+        const closeBtn = modal.querySelector('.modal-close');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', () => {
+                closeModal(modal);
+                if (modal === customPromptModal && typeof currentPromptConfig.onCancel === 'function') {
+                    currentPromptConfig.onCancel();
+                }
+                if (modal === annualReportModal) closeAnnualReportModal();
+            });
+        }
+    });
+
+    if (statsBtn) statsBtn.addEventListener('click', () => {
+ if (statsModal) {
+                // 调用我们在 app.js 中新定义的、统一的统计处理函数
+                handleStatsButtonClick();
+            } else {
+                // 如果模态框不存在，在控制台给出警告
+                console.warn("统计模态框的 DOM 元素 (statsModal) 未找到。");
+                // 你也可以在这里给用户一个提示，比如弹出一个自定义提示框
+                // openCustomPrompt({title:"错误", message:"无法打开统计分析，相关界面元素丢失。", inputType:'none', confirmText:'好的', hideCancelButton:true});
+            }
+        });
+    
+    if (faqBtn) faqBtn.addEventListener('click', showFaqModal);
+    if (featuresBtn) featuresBtn.addEventListener('click', showFeaturesModal);
+    if (donateBtn) donateBtn.addEventListener('click', () => openModal(donateModal));
+
+
+
+const manualRefreshBtn = document.getElementById('manual-refresh-btn');
+if (manualRefreshBtn) {
+    manualRefreshBtn.addEventListener('click', forceRefreshData);
+}
+
+
+    if (monthlyHistoryBtn) { 
+        monthlyHistoryBtn.addEventListener('click', () => { 
+            if (selectedMonthlyDisplayMonth !== 'current') { 
+                resetToCurrent('monthly'); 
+            } else { 
+                openHistoryModal('monthly'); 
+            } 
+        }); 
+    }
+    if (ledgerHistoryBtn) { 
+        ledgerHistoryBtn.addEventListener('click', () => { 
+            if (selectedLedgerMonth !== 'current') { 
+                resetToCurrent('ledger'); 
+            } else { 
+                openHistoryModal('ledger'); 
+            } 
+        }); 
+    }
+    
+
+// --- 【新增/修改】处理“更多”菜单的逻辑 ---
+    const moreActionsBtn = document.getElementById('more-actions-btn'); // 在 initializeApp 中获取
+    const moreActionsMenu = document.getElementById('more-actions-menu'); // 在 initializeApp 中获取
+
+    if (moreActionsBtn && moreActionsMenu) {
+        moreActionsBtn.addEventListener('click', (event) => {
+            event.stopPropagation(); // 防止点击事件冒泡到 document
+            moreActionsMenu.classList.toggle('visible');
+            
+            const isExpanded = moreActionsMenu.classList.contains('visible');
+            moreActionsBtn.setAttribute('aria-expanded', isExpanded.toString());
+        });
+
+        // 点击菜单外部时关闭菜单
+        document.addEventListener('click', (event) => {
+            if (moreActionsMenu.classList.contains('visible') && 
+                !moreActionsMenu.contains(event.target) && 
+                event.target !== moreActionsBtn && 
+                !moreActionsBtn.contains(event.target) 
+            ) {
+                moreActionsMenu.classList.remove('visible');
+                moreActionsBtn.setAttribute('aria-expanded', 'false');
+            }
+        });
+
+        // 点击菜单项后，关闭菜单 (菜单项按钮自身的原有功能会继续执行)
+        moreActionsMenu.querySelectorAll('button').forEach(button => {
+            button.addEventListener('click', () => {
+                // 这里不需要阻止按钮的默认行为或事件冒泡
+                // 按钮原有的事件监听器（如打开模态框）会正常触发
+                moreActionsMenu.classList.remove('visible');
+                moreActionsBtn.setAttribute('aria-expanded', 'false');
+            });
+        });
+
+        // 按下 Escape 键关闭菜单
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && moreActionsMenu.classList.contains('visible')) {
+                moreActionsMenu.classList.remove('visible');
+                moreActionsBtn.setAttribute('aria-expanded', 'false');
+            }
+        });
+    }
+
+    if (themeToggleBtn) themeToggleBtn.addEventListener('click', toggleTheme);
+    if (feedbackBtn) feedbackBtn.addEventListener('click', () => { 
+        window.open('mailto:martinlinzhiwu@gmail.com?subject=Regarding EfficienTodo PWA', '_blank'); 
+    });
+    if (toggleNotificationsBtn) toggleNotificationsBtn.addEventListener('click', toggleNotificationSetting);
+    if (mainSearchInput) { 
+        mainSearchInput.addEventListener('input', (e) => { 
+            currentSearchTerm = e.target.value.trim().toLowerCase(); 
+            renderAllLists(); 
+        }); 
+    }
+
+    if (addDailyTaskBtn && newDailyTaskInput) {
+        addDailyTaskBtn.addEventListener('click', () => addTask(newDailyTaskInput, 'daily', renderAllLists, { type: 'daily' }));
+        newDailyTaskInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') addDailyTaskBtn.click(); });
+    }
+    if (addMonthlyTaskBtn && newMonthlyTaskInput && newMonthlyTagsInput) {
+        const addMonthlyHandler = () => addTask(newMonthlyTaskInput, 'monthly', renderAllLists, { type: 'monthly', tagsInputElement: newMonthlyTagsInput });
+        addMonthlyTaskBtn.addEventListener('click', addMonthlyHandler);
+        newMonthlyTaskInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') addMonthlyHandler(); });
+        newMonthlyTagsInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') addMonthlyHandler(); });
+    }
+    if (addFutureTaskBtn && newFutureTaskInput && futureTaskDateTimeInput) {
+        addFutureTaskBtn.addEventListener('click', () => addTask(newFutureTaskInput, 'future', renderAllLists, { type: 'future', dateElement: futureTaskDateTimeInput }));
+    }
+
+    if (addLedgerBtn && ledgerDateInput && ledgerItemInput && ledgerAmountInput) { 
+        const addLedgerEntry = () => { 
+            const date = ledgerDateInput.value; 
+            const item = ledgerItemInput.value.trim(); 
+            const amountStr = ledgerAmountInput.value.trim(); 
+            const payment = ledgerPaymentInput ? ledgerPaymentInput.value.trim() : ''; 
+            const details = ledgerDetailsInput ? ledgerDetailsInput.value.trim() : ''; 
+            if (!date || !item || !amountStr) { 
+                openCustomPrompt({ title: "输入不完整", message: "请完整填写日期、项目和金额！", inputType: 'none', confirmText: "好的", hideCancelButton: true }); 
+                return; 
+            } 
+            const amount = parseFloat(amountStr);
+            if (isNaN(amount) || amount <= 0) {
+                 openCustomPrompt({ title: "金额无效", message: "请输入有效的正数金额！", inputType: 'none', confirmText: "好的", hideCancelButton: true }); 
+                return;
+            }
+            if (!allTasks.ledger) allTasks.ledger = []; 
+            allTasks.ledger.unshift({ date, item, amount, payment, details }); 
+            ledgerDateInput.valueAsDate = new Date(); 
+            ledgerItemInput.value = ''; 
+            ledgerAmountInput.value = ''; 
+            if(ledgerPaymentInput) ledgerPaymentInput.value = ''; 
+            if(ledgerDetailsInput) ledgerDetailsInput.value = ''; 
+            ledgerItemInput.focus(); 
+            saveTasks().then(renderAllLists);
+        }; 
+        addLedgerBtn.addEventListener('click', addLedgerEntry); 
+        const ledgerInputsForEnter = [ledgerItemInput, ledgerAmountInput, ledgerPaymentInput, ledgerDetailsInput].filter(Boolean);
+        ledgerInputsForEnter.forEach((input, idx) => { 
+            if (input) {
+                input.addEventListener('keypress', e => { 
+                    if (e.key === 'Enter') {
+                        // 如果是最后一个输入框，或者下一个必填项（假设item和amount是必填）为空，则尝试添加
+                        if (idx === ledgerInputsForEnter.length - 1 || 
+                            (ledgerInputsForEnter[idx+1] === ledgerAmountInput && !ledgerAmountInput.value.trim()) ||
+                            (ledgerInputsForEnter[idx+1] !== ledgerAmountInput && !ledgerInputsForEnter[idx+1].value.trim())
+                           ) {
+                            addLedgerEntry(); 
+                        } else if (ledgerInputsForEnter[idx+1]) {
+                            ledgerInputsForEnter[idx+1].focus(); 
+                        }
+                    }
+                }); 
+            }
+        }); 
+    }
+
+    if (historyPrevYearBtn) historyPrevYearBtn.addEventListener('click', () => changeHistoryYear(-1));
+    if (historyNextYearBtn) historyNextYearBtn.addEventListener('click', () => changeHistoryYear(1));
+    if (downloadMonthlyTemplateBtn) downloadMonthlyTemplateBtn.addEventListener('click', downloadMonthlyTemplate);
+    if (exportMonthlyHistoryBtn) exportMonthlyHistoryBtn.addEventListener('click', exportMonthlyHistory);
+    if (importMonthlyBtn && importMonthlyFileInput) {
+        importMonthlyBtn.addEventListener('click', () => importMonthlyFileInput.click());
+        importMonthlyFileInput.addEventListener('change', handleMonthlyImport);
+    }
+    if (downloadLedgerTemplateBtn) downloadLedgerTemplateBtn.addEventListener('click', downloadLedgerTemplate);
+    if (exportLedgerHistoryBtn) exportLedgerHistoryBtn.addEventListener('click', exportLedgerHistory);
+    if (importLedgerBtn && importLedgerFileInput) {
+        importLedgerBtn.addEventListener('click', () => importLedgerFileInput.click());
+        importLedgerFileInput.addEventListener('change', handleLedgerImport);
+    }
+    if (sortMonthlyByPriorityBtn) sortMonthlyByPriorityBtn.addEventListener('click', sortMonthlyTasksByPriority);
+    if (setBudgetBtn) setBudgetBtn.addEventListener('click', openBudgetModal);
+    if (annualReportBtn) annualReportBtn.addEventListener('click', openAnnualReportModal);
+    if (currencyPickerBtn) currencyPickerBtn.addEventListener('click', openCurrencyPicker);
+
+    if (customPromptConfirmBtn) {
+        customPromptConfirmBtn.addEventListener('click', () => {
+            if(typeof currentPromptConfig.onConfirm === 'function') {
+                const inputField = document.getElementById('custom-prompt-input-field');
+                const value = inputField ? inputField.value : undefined;
+                if(currentPromptConfig.onConfirm(value) !== false) {
+                    closeCustomPrompt();
+                }
+            } else {
+                closeCustomPrompt();
+            }
+        });
+    }
+    if(customPromptCancelBtn) {
+        customPromptCancelBtn.addEventListener('click', () => { 
+            if(typeof currentPromptConfig.onCancel === 'function') currentPromptConfig.onCancel(); 
+            closeCustomPrompt(); 
+        });
+    }
+    
+
+// 当点击统计按钮时，app.js 可以先确保数据已传递
+// (在 app.js 的 bindEventListeners 中)
+    if (statsBtn) {
+        statsBtn.addEventListener('click', () => {
+            // 确保统计模态框的 DOM 元素存在
+            if (statsModal) {
+                // 调用我们在 app.js 中新定义的、统一的统计处理函数
+                handleStatsButtonClick();
+            } else {
+                // 如果模态框不存在，在控制台给出警告
+                console.warn("统计模态框的 DOM 元素 (statsModal) 未找到。");
+                // 你也可以在这里给用户一个提示，比如弹出一个自定义提示框
+                // openCustomPrompt({title:"错误", message:"无法打开统计分析，相关界面元素丢失。", inputType:'none', confirmText:'好的', hideCancelButton:true});
+            }
+        });
+    }
+
+if (aiSettingsBtn) {
+    aiSettingsBtn.addEventListener('click', showAiSettingsModal);
+}
+if (aiAssistantBtn) {
+    aiAssistantBtn.addEventListener('click', () => openModal(aiAssistantModal));
+}
+
+
+if (aiPromptInput) {
+    aiPromptInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            handleAiProcess();
+        }
+    });
+}
+
+    // --- 调整 aiAssistantBtn 的监听器 ---
+    if (aiAssistantBtn) {
+        aiAssistantBtn.addEventListener('click', () => {
+            // 每次打开时，重置为“智能添加”模式
+            aiAddView.classList.remove('hidden');
+            aiReportView.classList.add('hidden');
+            aiModeAddBtn.classList.add('active');
+            aiModeReportBtn.classList.remove('active');
+            
+            // 重置报告视图到初始状态
+            reportOptionsGrid.classList.remove('hidden');
+            aiReportOutput.classList.add('hidden');
+
+            openModal(aiAssistantModal);
+        });
+    }
+
+    // --- 新增模式切换的监听器 ---
+    if (aiModeSelector) {
+        aiModeSelector.addEventListener('click', (e) => {
+            if (e.target.tagName !== 'BUTTON') return;
+            
+            // 移除所有按钮的 active 状态
+            aiModeSelector.querySelectorAll('button').forEach(btn => btn.classList.remove('active'));
+            // 为被点击的按钮添加 active 状态
+            e.target.classList.add('active');
+            
+            const viewId = e.target.dataset.view;
+            // 隐藏所有视图
+            document.querySelectorAll('.ai-view').forEach(view => view.classList.add('hidden'));
+            // 显示目标视图
+            if (document.getElementById(viewId)) {
+                document.getElementById(viewId).classList.remove('hidden');
+            }
+        });
+    }
+
+  if (reportOptionsGrid) {
+        reportOptionsGrid.addEventListener('click', (e) => {
+            if (e.target.tagName === 'BUTTON') {
+                const reportType = e.target.dataset.reportType;
+                // 【修改】调用新的准备函数，而不是直接生成
+                prepareReportConfirmation(reportType);
+            }
+        });
+    }
+    
+    // --- 报告返回按钮的监听器 ---
+    if (aiReportBackBtn) {
+        aiReportBackBtn.addEventListener('click', () => {
+            reportOptionsGrid.classList.remove('hidden');
+            aiReportOutput.classList.add('hidden');
+            
+            // 【新增】当返回时，清理掉“确认生成”按钮
+            const confirmBtn = document.getElementById('ai-confirm-generate-btn');
+            if (confirmBtn) confirmBtn.remove();
+            // 【新增】当返回选择时，也隐藏Notion授权警告
+            const warningEl = document.getElementById('notion-auth-warning');
+            if (warningEl) warningEl.classList.add('hidden');
+        });
+    }
+
+ if (aiProcessBtn) {
+    aiProcessBtn.addEventListener('click', handleAiProcess);
+}
+
+   if (aiReportCopyBtn) {
+        aiReportCopyBtn.addEventListener('click', () => {
+            const reportText = aiReportContent.innerText; // 获取纯文本内容
+            navigator.clipboard.writeText(reportText).then(() => {
+                aiReportCopyBtn.textContent = '已复制!';
+                setTimeout(() => { aiReportCopyBtn.textContent = '复制报告'; }, 2000);
+            }).catch(err => {
+                console.error('复制失败: ', err);
+            });
+        });
+    }
+
+if (aiAssistantCloseBtn) {
+    aiAssistantCloseBtn.addEventListener('click', () => closeModal(aiAssistantModal));
+}
+
+
+        // 确保统计模态框内的时间选择器事件被绑定
+    setupStatsTimespanSelectors();
+}
 // ========================================================================
 // 统计分析图表功能
 // ========================================================================
@@ -5936,364 +5860,49 @@ async function requestBackupCheck() {
     }
 }
 
-
-
-let GAPI_INSTANCE = null;
-let GIS_OAUTH2_INSTANCE = null;
-
-// ========================================================================
-// 8. 事件监听器绑定
-// ========================================================================
-
-/**
- * 将所有DOM元素的事件监听器集中绑定到这里。
- * 这个函数应该在 initializeApp 中被调用，在所有元素都已获取之后。
- */
-function bindEventListeners() {
- 
-    // --- 自动同步逻辑 ---
-    let syncTimeout = null;
-    const triggerSync = () => {
-        clearTimeout(syncTimeout);
-        syncTimeout = setTimeout(() => {
-            if (isDataDirty) { 
-                console.log('Visibility change detected and data is dirty, triggering auto-sync.');
-                const syncButton = document.getElementById('sync-drive-btn');
-                if (syncButton && !syncButton.disabled) {
-                    syncButton.click();
-                }
-            } else {
-                console.log('Visibility change detected, but data is clean. Skipping sync.');
-            }
-        }, 1000); 
-    };
-    window.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') {
-            triggerSync();
-        }
-    });
-    window.addEventListener('focus', triggerSync);
-
-    // --- 头部操作按钮 ---
-    if (syncDriveBtn && syncStatusSpan) {
-        syncDriveBtn.addEventListener('click', async () => {
-            if (autoSyncTimer) { clearTimeout(autoSyncTimer); autoSyncTimer = null; }
-            console.log("Manual sync: Pushing local data to cloud.");
-            syncStatusSpan.textContent = '准备同步...';
-            syncDriveBtn.disabled = true;
-            try {
-                await driveSync.findOrCreateFile();
-                if (!isDataDirty) {
-                    syncStatusSpan.textContent = '数据已是最新';
-                    setTimeout(() => { if(syncStatusSpan.textContent === '数据已是最新') syncStatusSpan.textContent = ''; }, 3000);
-                    return;
-                }
-                syncStatusSpan.textContent = '正在上传...';
-                await driveSync.upload(allTasks);
-                isDataDirty = false;
-                updateSyncIndicator();
-                const timeString = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-                localStorage.setItem('lastSyncTime', timeString);
-                syncStatusSpan.textContent = `已于 ${timeString} 同步`;
-                setTimeout(() => { if (syncStatusSpan.textContent.includes('同步')) { syncStatusSpan.textContent = ''; } }, 7000);
-            } catch (error) {
-                console.error("Manual sync failed:", error);
-                const errorMessage = error.message || '未知错误';
-                if (error.message !== "REAUTH_REQUIRED") {
-                    syncStatusSpan.textContent = `同步错误: ${errorMessage.substring(0, 40)}...`;
-                }
-            } finally {
-                syncDriveBtn.disabled = false;
-            }
-        });
-    }
-    
-    const manualRefreshBtn = document.getElementById('manual-refresh-btn');
-    if (manualRefreshBtn) {
-        manualRefreshBtn.addEventListener('click', forceRefreshData);
-    }
-    
-    if (themeToggleBtn) themeToggleBtn.addEventListener('click', toggleTheme);
-    if (toggleNotificationsBtn) toggleNotificationsBtn.addEventListener('click', toggleNotificationSetting);
-
-    // --- 更多菜单 ---
-    const moreActionsBtn = document.getElementById('more-actions-btn');
-    const moreActionsMenu = document.getElementById('more-actions-menu');
-    if (moreActionsBtn && moreActionsMenu) {
-        moreActionsBtn.addEventListener('click', (event) => {
-            event.stopPropagation();
-            moreActionsMenu.classList.toggle('visible');
-            moreActionsBtn.setAttribute('aria-expanded', moreActionsMenu.classList.contains('visible').toString());
-        });
-        document.addEventListener('click', (event) => {
-            if (moreActionsMenu.classList.contains('visible') && !moreActionsMenu.contains(event.target) && event.target !== moreActionsBtn && !moreActionsBtn.contains(event.target)) {
-                moreActionsMenu.classList.remove('visible');
-                moreActionsBtn.setAttribute('aria-expanded', 'false');
-            }
-        });
-        moreActionsMenu.querySelectorAll('button, a').forEach(item => {
-            item.addEventListener('click', () => {
-                moreActionsMenu.classList.remove('visible');
-                moreActionsBtn.setAttribute('aria-expanded', 'false');
-            });
-        });
-        document.addEventListener('keydown', (event) => {
-            if (event.key === 'Escape' && moreActionsMenu.classList.contains('visible')) {
-                moreActionsMenu.classList.remove('visible');
-                moreActionsBtn.setAttribute('aria-expanded', 'false');
-            }
-        });
-    }
-
-    // --- 更多菜单内的功能按钮 ---
-    if (faqBtn) faqBtn.addEventListener('click', showFaqModal);
-    if (featuresBtn) featuresBtn.addEventListener('click', showFeaturesModal);
-    if (donateBtn) donateBtn.addEventListener('click', () => openModal(donateModal));
-    if (feedbackBtn) feedbackBtn.addEventListener('click', () => { window.open('mailto:martinlinzhiwu@gmail.com?subject=Regarding EfficienTodo PWA', '_blank'); });
-    if (aiSettingsBtn) aiSettingsBtn.addEventListener('click', showAiSettingsModal);
-    
-    // --- 备份与恢复 ---
-    if (backupRestoreBtn) {
-        backupRestoreBtn.addEventListener('click', () => {
-            openCustomPrompt({
-                title: '备份与恢复',
-                message: '您可以下载完整备份文件，或从每日自动快照中恢复。',
-                htmlContent: `<div class="custom-prompt-actions" style="flex-direction: column; gap: 10px;"><button id="backup-btn" class="custom-prompt-btn custom-prompt-confirm">备份当前数据到文件</button><button id="restore-btn" class="custom-prompt-btn">从文件恢复...</button><button id="view-history-btn" class="custom-prompt-btn">查看历史快照...</button></div>`,
-                hideConfirmButton: true, hideCancelButton: true,
-                onRender: () => {
-                    document.getElementById('backup-btn').onclick = () => { handleBackup(); closeCustomPrompt(); };
-                    document.getElementById('restore-btn').onclick = () => { closeCustomPrompt(); restoreFileInput.click(); };
-                    document.getElementById('view-history-btn').onclick = () => { closeCustomPrompt(); showVersionHistoryModal(); };
-                }
-            });
-        });
-    }
-    if (restoreFileInput) {
-        restoreFileInput.addEventListener('change', (event) => {
-            const file = event.target.files[0]; if (!file) return;
-            const reader = new FileReader();
-            reader.onload = (e) => {
-                try {
-                    const restoredData = JSON.parse(e.target.result);
-                    if (restoredData && restoredData.monthly && restoredData.daily) {
-                        showRestoreConfirmation(restoredData);
-                    } else { throw new Error('文件格式无效或不包含预期数据。'); }
-                } catch (error) {
-                    openCustomPrompt({ title: '恢复失败', message: `无法解析备份文件。错误: ${error.message}`, inputType: 'none', confirmText: '好的', hideCancelButton: true });
-                }
-            };
-            reader.readAsText(file);
-            event.target.value = '';
-        });
-    }
-    if (versionHistoryCloseBtn) versionHistoryCloseBtn.addEventListener('click', hideVersionHistoryModal);
-    if (versionHistoryModal) versionHistoryModal.addEventListener('click', (e) => { if(e.target === versionHistoryModal) hideVersionHistoryModal(); });
-
-    // --- 底部导航和模态框通用逻辑 ---
-    if (bottomNav) {
-        bottomNav.addEventListener('click', (e) => {
-            const tab = e.target.closest('.tab-item');
-            if (!tab || !tab.dataset.section) return; 
-            e.preventDefault();
-            switchView(tab.dataset.section);
-        });
-    }
-    document.querySelectorAll('.modal-overlay').forEach(modal => {
-        modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(modal); });
-        const closeBtn = modal.querySelector('.modal-close');
-        if (closeBtn) closeBtn.addEventListener('click', () => closeModal(modal));
-    });
-
-    // --- 搜索和AI助手 ---
-    if (mainSearchInput) { 
-        mainSearchInput.addEventListener('input', (e) => { 
-            currentSearchTerm = e.target.value.trim().toLowerCase(); 
-            renderAllLists(); 
-        }); 
-    }
-    if (aiAssistantBtn) {
-        aiAssistantBtn.addEventListener('click', () => {
-            if(aiAddView) aiAddView.classList.remove('hidden');
-            if(aiReportView) aiReportView.classList.add('hidden');
-            if(aiModeAddBtn) aiModeAddBtn.classList.add('active');
-            if(aiModeReportBtn) aiModeReportBtn.classList.remove('active');
-            if(reportOptionsGrid) reportOptionsGrid.classList.remove('hidden');
-            if(aiReportOutput) aiReportOutput.classList.add('hidden');
-            openModal(aiAssistantModal);
-        });
-    }
-
-    // --- 各个模块的输入区域 ---
-    if (addDailyTaskBtn && newDailyTaskInput) {
-        addDailyTaskBtn.addEventListener('click', () => addTask(newDailyTaskInput, 'daily', renderAllLists, { type: 'daily' }));
-        newDailyTaskInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') addDailyTaskBtn.click(); });
-    }
-    if (addMonthlyTaskBtn && newMonthlyTaskInput && newMonthlyTagsInput) {
-        const addMonthlyHandler = () => addTask(newMonthlyTaskInput, 'monthly', renderAllLists, { type: 'monthly', tagsInputElement: newMonthlyTagsInput });
-        addMonthlyTaskBtn.addEventListener('click', addMonthlyHandler);
-        newMonthlyTaskInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') addMonthlyHandler(); });
-        newMonthlyTagsInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') addMonthlyHandler(); });
-    }
-    if (addFutureTaskBtn && newFutureTaskInput && futureTaskDateTimeInput) {
-        addFutureTaskBtn.addEventListener('click', () => addTask(newFutureTaskInput, 'future', renderAllLists, { type: 'future', dateElement: futureTaskDateTimeInput }));
-    }
-    if (addLedgerBtn && ledgerDateInput && ledgerItemInput && ledgerAmountInput) { 
-        const addLedgerEntry = () => { /* ... (addLedgerEntry 内容保持不变) */ }; 
-        addLedgerBtn.addEventListener('click', addLedgerEntry); 
-        [ledgerItemInput, ledgerAmountInput, ledgerPaymentInput, ledgerDetailsInput].filter(Boolean).forEach(input => { 
-            input.addEventListener('keypress', e => { if (e.key === 'Enter') addLedgerEntry(); }); 
-        }); 
-    }
-
-    // --- 各个模块的工具栏 ---
-    if (sortMonthlyByPriorityBtn) sortMonthlyByPriorityBtn.addEventListener('click', sortMonthlyTasksByPriority);
-    if (monthlyHistoryBtn) { monthlyHistoryBtn.addEventListener('click', () => { if (selectedMonthlyDisplayMonth !== 'current') { resetToCurrent('monthly'); } else { openHistoryModal('monthly'); } }); }
-    if (ledgerHistoryBtn) { ledgerHistoryBtn.addEventListener('click', () => { if (selectedLedgerMonth !== 'current') { resetToCurrent('ledger'); } else { openHistoryModal('ledger'); } }); }
-    if (historyPrevYearBtn) historyPrevYearBtn.addEventListener('click', () => changeHistoryYear(-1));
-    if (historyNextYearBtn) historyNextYearBtn.addEventListener('click', () => changeHistoryYear(1));
-    if (downloadMonthlyTemplateBtn) downloadMonthlyTemplateBtn.addEventListener('click', downloadMonthlyTemplate);
-    if (exportMonthlyHistoryBtn) exportMonthlyHistoryBtn.addEventListener('click', exportMonthlyHistory);
-    if (importMonthlyBtn && importMonthlyFileInput) {
-        importMonthlyBtn.addEventListener('click', () => importMonthlyFileInput.click());
-        importMonthlyFileInput.addEventListener('change', handleMonthlyImport);
-    }
-    if (downloadLedgerTemplateBtn) downloadLedgerTemplateBtn.addEventListener('click', downloadLedgerTemplate);
-    if (exportLedgerHistoryBtn) exportLedgerHistoryBtn.addEventListener('click', exportLedgerHistory);
-    if (importLedgerBtn && importLedgerFileInput) {
-        importLedgerBtn.addEventListener('click', () => importLedgerFileInput.click());
-        importLedgerFileInput.addEventListener('change', handleLedgerImport);
-    }
-    if (setBudgetBtn) setBudgetBtn.addEventListener('click', openBudgetModal);
-    if (annualReportBtn) annualReportBtn.addEventListener('click', openAnnualReportModal);
-    if (currencyPickerBtn) currencyPickerBtn.addEventListener('click', openCurrencyPicker);
-
-    // --- 每日清单指标视图 ---
-if (viewSwitcher) {
-    viewSwitcher.addEventListener('click', (e) => {
-        if (e.target.tagName === 'BUTTON') {
-            viewSwitcher.querySelector('.active').classList.remove('active');
-            e.target.classList.add('active');
-            renderDailySection();
-        }
-    });
-}
-if (metricsSettingsBtn) {
-    metricsSettingsBtn.addEventListener('click', openMetricsSettingsModal);
-}
-if (goToMetricsSettingsBtn) {
-    goToMetricsSettingsBtn.addEventListener('click', openMetricsSettingsModal);
-}
-if (metricsDataTableContainer) {
-    metricsDataTableContainer.addEventListener('change', (e) => {
-        if (e.target.classList.contains('metric-value-input')) {
-            const { metricId, date } = e.target.dataset;
-            saveMetricValue(metricId, date, e.target.value);
-        }
-    });
-}
-
-// 【核心修复】让日历按钮和下拉菜单协同工作
-const metricsHistoryBtn = document.getElementById('metrics-history-btn'); // 再次获取以确保作用域
-const chartTimeDimensionSelect = document.getElementById('chart-time-dimension'); // 使用新变量名以示区分
-
-if (metricsHistoryBtn) {
-    // 点击日历图标，总是打开历史选择模态框
-    metricsHistoryBtn.addEventListener('click', () => {
-        openHistoryModal('metrics');
-    });
-}
-
-if (chartTimeDimensionSelect) {
-    // 当下拉菜单的值改变时，更新图表和表格
-    chartTimeDimensionSelect.addEventListener('change', () => {
-        const selectedValue = chartTimeDimensionSelect.value;
-        
-        // 更新全局状态变量，以便模态框下次打开时能同步
-        selectedMetricsDisplayMonth = (selectedValue === 'currentMonth') ? 'current' : selectedValue;
-
-        // 重新渲染表格和图表
-        renderMetricsDataTable();
-        renderMetricsChart();
-    });
-}
-
-if (refreshChartBtn) {
-    refreshChartBtn.addEventListener('click', renderMetricsChart);
-}
-    if (metricsSettingsBtn) metricsSettingsBtn.addEventListener('click', openMetricsSettingsModal);
-    if (goToMetricsSettingsBtn) goToMetricsSettingsBtn.addEventListener('click', openMetricsSettingsModal);
-    if (metricsDataTableContainer) {
-        metricsDataTableContainer.addEventListener('change', (e) => {
-            if (e.target.classList.contains('metric-value-input')) {
-                const { metricId, date } = e.target.dataset;
-                saveMetricValue(metricId, date, e.target.value);
-            }
-        });
-    }
-
-    // --- AI 模态框 ---
-    if (aiAssistantModal) {
-        aiAssistantModal.addEventListener('click', (e) => {
-            const button = e.target.closest('button');
-            if (!button) return;
-            if (button.matches('#ai-mode-add-btn, #ai-mode-report-btn')) {
-                const selector = button.closest('.ai-mode-selector');
-                selector.querySelectorAll('button').forEach(btn => btn.classList.remove('active'));
-                button.classList.add('active');
-                document.querySelectorAll('.ai-view').forEach(view => view.classList.add('hidden'));
-                const view = document.getElementById(button.dataset.view);
-                if(view) view.classList.remove('hidden');
-            } else if (button.dataset.reportType) {
-                prepareReportConfirmation(button.dataset.reportType);
-            } else {
-                switch (button.id) {
-                    case 'ai-assistant-close-btn': closeModal(aiAssistantModal); break;
-                    case 'ai-process-btn': handleAiProcess(); break;
-                    case 'ai-report-copy-btn':
-                        navigator.clipboard.writeText(aiReportContent.innerText).then(() => {
-                            button.textContent = '已复制!';
-                            setTimeout(() => { button.textContent = '复制报告'; }, 2000);
-                        });
-                        break;
-                    case 'export-to-notion-btn': handleExportToNotionClick(); break;
-                    case 'ai-report-back-btn':
-                        if(reportOptionsGrid) reportOptionsGrid.classList.remove('hidden');
-                        if(aiReportOutput) aiReportOutput.classList.add('hidden');
-                        const confirmBtn = document.getElementById('ai-confirm-generate-btn');
-                        if (confirmBtn) confirmBtn.remove();
-                        const warningEl = document.getElementById('notion-auth-warning');
-                        if (warningEl) warningEl.classList.add('hidden');
-                        break;
-                }
-            }
-        });
-    }
-    if (aiPromptInput) {
-        aiPromptInput.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAiProcess(); } });
-    }
-    
-    // --- 统计模态框 ---
-    if (statsBtn) statsBtn.addEventListener('click', handleStatsButtonClick);
-    setupStatsTimespanSelectors();
-}
-
-// ========================================================================
-// 9. 应用初始化函数
-// ========================================================================
-
 async function initializeApp() {
     console.log("initializeApp: 开始应用初始化。");
+    await handleGoogleAuthCallback();
 
-    // --- 1. 获取所有 DOM 元素，存储到全局变量 ---
-    // (将之前散落的获取代码集中到这里)
+    // AI Assistant & Report Generator Elements
+    aiAssistantBtn = document.getElementById('ai-assistant-btn');
+    aiAssistantModal = document.getElementById('ai-assistant-modal');
+    aiAssistantCloseBtn = document.getElementById('ai-assistant-close-btn');
+    aiModeSelector = document.querySelector('.ai-mode-selector');
+    aiModeAddBtn = document.getElementById('ai-mode-add-btn');
+    aiModeReportBtn = document.getElementById('ai-mode-report-btn');
+    aiAddView = document.getElementById('ai-add-view');
+    aiReportView = document.getElementById('ai-report-view');
+    aiAddLoading = document.getElementById('ai-add-loading');
+    reportOptionsGrid = document.querySelector('.report-options-grid');
+    aiReportOutput = document.getElementById('ai-report-output');
+    aiReportTitle = document.getElementById('ai-report-title');
+    aiReportLoading = document.getElementById('ai-report-loading');
+    aiReportContent = document.getElementById('ai-report-content');
+    aiReportCopyBtn = document.getElementById('ai-report-copy-btn');
+    aiReportBackBtn = document.getElementById('ai-report-back-btn');
+
+statsModal = document.getElementById('stats-modal'); // 确保这行存在且正确
+if (!statsModal) {
+    console.error("关键错误：未能获取到 stats-modal 元素！请检查 HTML ID。");
+}
+    // 1. 获取所有 DOM 元素 (确保在此处获取所有需要的元素)
     statsBtn = document.getElementById('stats-btn');
-    statsModal = document.getElementById('stats-modal');
-    statsModalCloseBtn = document.getElementById('stats-modal-close-btn');
+    const statsModals = document.querySelectorAll('#stats-modal'); // ID应该是唯一的，但以防万一
+    if (statsModals.length > 0) {
+        statsModal = statsModals[0]; 
+        if (statsModal) {
+            statsModalCloseBtn = statsModal.querySelector('#stats-modal-close-btn'); 
+            // 注意：关闭按钮的事件监听器在 bindEventListeners 中统一设置
+        }
+    }
+
+
     faqBtn = document.getElementById('faq-btn');
     faqModal = document.getElementById('faq-modal');
-    faqModalCloseBtn = document.getElementById('faq-modal-close-btn');
+    // faqModalCloseBtn
     faqListDiv = document.getElementById('faq-list');
-    mainSearchInput = document.getElementById('main-search-input');
+    mainSearchInput = document.getElementById('main-search-input'); 
     dailyTitleDate = document.getElementById('daily-title-date');
     themeToggleBtn = document.getElementById('theme-toggle-btn');
     feedbackBtn = document.getElementById('feedback-btn');
@@ -6327,16 +5936,17 @@ async function initializeApp() {
     monthlyHistoryBtn = document.getElementById('monthly-history-btn');
     ledgerHistoryBtn = document.getElementById('ledger-history-btn');
     historyModal = document.getElementById('history-modal');
-    historyModalCloseBtn = document.getElementById('history-modal-close-btn');
+    // historyModalCloseBtn
     historyModalTitle = document.getElementById('history-modal-title');
     historyPrevYearBtn = document.getElementById('history-prev-year-btn');
     historyNextYearBtn = document.getElementById('history-next-year-btn');
     historyCurrentYearSpan = document.getElementById('history-current-year');
     historyMonthsGrid = document.getElementById('history-months-grid');
     donateModal = document.getElementById('donate-modal');
+    // modalCloseBtn (for donate-modal, assumes a specific ID or class handled by generic logic)
     featuresBtn = document.getElementById('features-btn');
     featuresModal = document.getElementById('features-modal');
-    featuresModalCloseBtn = document.getElementById('features-modal-close-btn');
+    // featuresModalCloseBtn
     featuresListUl = document.getElementById('features-list');
     exportMonthlyHistoryBtn = document.getElementById('export-monthly-history-btn');
     importMonthlyBtn = document.getElementById('import-monthly-btn');
@@ -6346,27 +5956,27 @@ async function initializeApp() {
     importLedgerBtn = document.getElementById('import-ledger-btn');
     downloadLedgerTemplateBtn = document.getElementById('download-ledger-template-btn');
     importLedgerFileInput = document.getElementById('import-ledger-file-input');
-    toggleNotificationsBtn = document.getElementById('toggle-notifications-btn');
+    toggleNotificationsBtn = document.getElementById('toggle-notifications-btn'); // 确保在 loadNotificationSetting 前获取
     customPromptModal = document.getElementById('custom-prompt-modal');
+    // customPromptCloseBtn
     customPromptTitleEl = document.getElementById('custom-prompt-title');
     customPromptMessageEl = document.getElementById('custom-prompt-message');
     customPromptInputContainer = document.getElementById('custom-prompt-input-container');
     customPromptConfirmBtn = document.getElementById('custom-prompt-confirm-btn');
     customPromptCancelBtn = document.getElementById('custom-prompt-cancel-btn');
-    customPromptCloseBtn = document.getElementById('custom-prompt-close-btn');
     setBudgetBtn = document.getElementById('set-budget-btn');
     annualReportBtn = document.getElementById('annual-report-btn');
     annualReportModal = document.getElementById('annual-report-modal');
-    annualReportCloseBtn = document.getElementById('annual-report-close-btn');
-    annualReportTitle = document.getElementById('annual-report-title');
+    // annualReportCloseBtn
+    annualReportTitle = document.getElementById('annual-report-title'); // Assuming this exists, if not, remove or use a more generic h2
     annualReportPrevYearBtn = document.getElementById('annual-report-prev-year-btn');
     annualReportNextYearBtn = document.getElementById('annual-report-next-year-btn');
     annualReportCurrentYearSpan = document.getElementById('annual-report-current-year');
     annualReportSummaryDiv = document.getElementById('annual-report-summary');
     annualReportDetailsDiv = document.getElementById('annual-report-details');
     currencyPickerBtn = document.getElementById('currency-picker-btn');
-    syncDriveBtn = document.getElementById('sync-drive-btn');
-    syncStatusSpan = document.getElementById('sync-status');
+    syncDriveBtn = document.getElementById('sync-drive-btn'); // 确保在 loadGoogleApis 前获取
+    syncStatusSpan = document.getElementById('sync-status'); // 确保在 loadGoogleApis 前获取
     bottomNav = document.querySelector('.bottom-tab-nav');
     allSections = document.querySelectorAll('.section[id]');
     backupRestoreBtn = document.getElementById('backup-restore-btn');
@@ -6380,38 +5990,11 @@ async function initializeApp() {
     aiAssistantCloseBtn = document.getElementById('ai-assistant-close-btn');
     aiPromptInput = document.getElementById('ai-prompt-input');
     aiProcessBtn = document.getElementById('ai-process-btn');
-    aiAddLoading = document.getElementById('ai-add-loading');
-    aiModeSelector = document.querySelector('.ai-mode-selector');
-    aiModeAddBtn = document.getElementById('ai-mode-add-btn');
-    aiModeReportBtn = document.getElementById('ai-mode-report-btn');
-    aiAddView = document.getElementById('ai-add-view');
-    aiReportView = document.getElementById('ai-report-view');
-    reportOptionsGrid = document.querySelector('.report-options-grid');
-    aiReportOutput = document.getElementById('ai-report-output');
-    aiReportTitle = document.getElementById('ai-report-title');
-    aiReportLoading = document.getElementById('ai-report-loading');
-    aiReportContent = document.getElementById('ai-report-content');
-    aiReportCopyBtn = document.getElementById('ai-report-copy-btn');
-    aiReportBackBtn = document.getElementById('ai-report-back-btn');
-    viewSwitcher = document.querySelector('.view-switcher');
-    showTasksViewBtn = document.getElementById('show-tasks-view-btn');
-    showMetricsViewBtn = document.getElementById('show-metrics-view-btn');
-    dailyTasksView = document.getElementById('daily-tasks-view');
-    dailyMetricsView = document.getElementById('daily-metrics-view');
-    metricsControls = document.getElementById('metrics-controls');
-    metricsSettingsBtn = document.getElementById('metrics-settings-btn');
-    metricsProjectPills = document.getElementById('metrics-project-pills');
-    metricsChartContainer = document.getElementById('metrics-chart-container');
-const metricsHistoryBtn = document.getElementById('metrics-history-btn');
-const chartTimeDimension = document.getElementById('chart-time-dimension');
-    refreshChartBtn = document.getElementById('refresh-chart-btn');
-    metricsChartCanvas = document.getElementById('metrics-chart');
-    metricsDataTableContainer = document.getElementById('metrics-data-table-container');
-    metricsInitialSetupPrompt = document.getElementById('metrics-initial-setup-prompt');
-    goToMetricsSettingsBtn = document.getElementById('go-to-metrics-settings-btn');
+    aiLoadingSpinner = document.getElementById('ai-loading-spinner');
+    
     console.log("initializeApp: 所有 DOM 元素已获取。");
 
-    // 2. 绑定事件
+     // 2. 绑定事件
     bindEventListeners();
     console.log("initializeApp: 事件监听器已绑定。");
 
@@ -6420,88 +6003,162 @@ const chartTimeDimension = document.getElementById('chart-time-dimension');
     loadTheme();
     await loadNotificationSetting();
     console.log("initializeApp: 主题和通知设置已加载。");
-    
-    // 4. 核心数据加载和渲染流程
-    try {
+    await handleNotionCallback(); 
+    // 4. 加载 Google API
+  
+  try {
         await loadTasks();
-        await runAutomaticUpkeepTasks(); // 在首次渲染前执行清理
         renderAllLists();
         initSortable();
         if (ledgerDateInput) ledgerDateInput.valueAsDate = new Date();
-        
-        // 恢复上次视图或显示默认视图
-        const lastView = localStorage.getItem('lastActiveSection') || 'daily-section';
-        switchView(lastView);
+        switchView('daily-section');
+        console.log("initializeApp: Local data loaded and UI rendered.");
 
-        console.log("initializeApp: 本地数据加载和UI渲染完毕。");
-
+        // Perform daily maintenance tasks on the now-loaded local data.
+        await runAutomaticUpkeepTasks();
     } catch (localError) {
-        console.error("initializeApp: 加载本地数据时发生严重错误:", localError);
+        console.error("initializeApp: A critical error occurred loading local data:", localError);
         openCustomPrompt({ title: "本地数据加载失败", message: localError.message, inputType: 'none', confirmText: '好的', hideCancelButton: true });
-        return; 
+        return; // Stop if we can't even load local data.
     }
 
-    // 5. 异步初始化云服务和后台任务
-    // (这些任务不会阻塞用户界面的显示)
-    (async () => {
-        try {
-            await handleGoogleAuthCallback();
-            await handleNotionCallback();
-            
-            console.log("initializeApp: 正在初始化云服务...");
-            await loadGoogleApis();
-            await syncWithCloudOnStartup();
-            console.log("initializeApp: 云服务初始化和检查完毕。");
-            
-            await requestBackupCheck();
+    // --- Part 3: Asynchronously Initialize Cloud Services ---
+    // This part now runs after the user can see their data.
+    // Failure here will not block the UI.
+    try {
+        // Handle potential OAuth2 callback from Google redirect FIRST.
+        await handleGoogleAuthCallback();
+        await handleNotionCallback();
+        
+        // Now, attempt to load the Google APIs.
+        console.log("initializeApp: Attempting to initialize Google Cloud services...");
+        await loadGoogleApis(); // Using the new robust function
+        
+        // If successful, proceed with the initial cloud sync check.
+        await syncWithCloudOnStartup();
+        console.log("initializeApp: Google Cloud services initialized and checked.");
 
-            if ('serviceWorker' in navigator && 'PeriodicSyncManager' in window) {
-                const registration = await navigator.serviceWorker.ready;
-                const status = await navigator.permissions.query({name: 'periodic-background-sync'});
-                if (status.state === 'granted') {
-                    await registration.periodicSync.register('daily-todo-backup', { minInterval: 12 * 60 * 60 * 1000 });
-                    console.log('定期后台同步已注册。');
-                } else {
-                    console.warn('未授予定期后台同步权限。');
-                }
-            }
-        } catch (cloudError) {
-            console.error("initializeApp: 初始化云服务或后台任务时失败:", cloudError);
-            if (syncStatusSpan) syncStatusSpan.textContent = '云同步不可用';
-            if (syncDriveBtn) syncDriveBtn.disabled = true;
-        }
-    })();
-    
-    // 6. Service Worker 更新逻辑
-    if ('serviceWorker' in navigator) {
-        let newWorker;
-        navigator.serviceWorker.ready.then(reg => {
-            if (reg) {
-                reg.addEventListener('updatefound', () => {
-                    newWorker = reg.installing;
-                    if (newWorker) {
-                        newWorker.addEventListener('statechange', () => {
-                            if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
-                                showUpdatePrompt(newWorker);
-                            }
-                        });
-                    }
+    } catch (cloudError) {
+        console.error("initializeApp: Failed to initialize cloud services:", cloudError);
+        // Inform the user that sync is unavailable, but the app is still usable.
+        if (syncStatusSpan) syncStatusSpan.textContent = '云同步不可用';
+        if (syncDriveBtn) syncDriveBtn.disabled = true;
+        // Do not show a blocking prompt here unless it's an auth error handled inside.
+    }
+
+
+     if ('serviceWorker' in navigator && 'PeriodicSyncManager' in window) {
+        try {
+            const registration = await navigator.serviceWorker.ready;
+            // 在注册前，先检查权限状态
+            const status = await navigator.permissions.query({name: 'periodic-background-sync'});
+            if (status.state === 'granted') {
+                // 权限已授予，可以注册
+                await registration.periodicSync.register('daily-todo-backup', {
+                    minInterval: 12 * 60 * 60 * 1000, // 至少每 12 小时尝试一次
                 });
+                console.log('Periodic Background Sync for daily backup registered.');
+            } else {
+                console.warn('Periodic Background Sync permission not granted. Automatic background backup may not work.');
+                // 你可以在这里选择性地向用户解释，或者静默处理
             }
+        } catch (e) {
+            console.error('Periodic Background Sync could not be registered!', e);
+        }
+    } else {
+        console.log('Periodic Background Sync not supported in this browser. Fallback to activate/startup checks.');
+    }
+
+async function handleNotionCallback() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const authCode = urlParams.get('code');
+
+    if (authCode) {
+        // 使用一个固定的、权威的PWA URL来清理地址栏
+        const PWA_URL = 'https://alanlinzw.github.io/'; // 你的PWA的固定URL
+        window.history.replaceState({}, document.title, PWA_URL);
+
+        // 显示加载提示
+        openCustomPrompt({
+            title: "正在完成Notion授权...",
+            message: "请稍候，正在通过安全代理验证您的授权信息。",
+            inputType: 'none',
+            hideConfirmButton: true,
+            hideCancelButton: true
         });
-        navigator.serviceWorker.getRegistration().then(reg => {
-            if (reg && reg.waiting) {
-                showUpdatePrompt(reg.waiting);
+
+        try {
+            // 定义你的Worker代理URL
+            const PROXY_URL = 'https://notion-auth-proxy.martinlinzhiwu.workers.dev/exchange-token';
+
+            // 通过代理，使用POST方法在请求体中发送code
+            const response = await fetch(PROXY_URL, {
+                method: "POST",
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code: authCode })
+            });
+
+            const tokenData = await response.json();
+
+            // 检查代理返回的响应是否成功
+            if (!response.ok || tokenData.error) {
+                throw new Error(tokenData.error || "从代理服务器获取Token失败。请检查Worker日志。");
             }
-        });
-        let refreshing;
-        navigator.serviceWorker.addEventListener('controllerchange', () => {
-            if (refreshing) return;
-            window.location.reload();
-            refreshing = true;
-        });
+            
+            // 存储获取到的token
+            await db.set('notion_access_token', tokenData.access_token);
+            await db.set('notion_workspace_id', tokenData.workspace_id);
+            
+            // 关闭加载提示，进入下一步：选择页面
+            closeCustomPrompt();
+            await selectNotionParentPage(true); // 传入true表示这是首次设置
+
+        } catch (error) {
+            closeCustomPrompt();
+            openCustomPrompt({ title: "Notion授权失败", message: error.message, inputType: 'none', confirmText: '好的' });
+        }
     }
 }
 
-// 最终的应用启动入口
+
+// 【新增】监听来自 Service Worker 的消息
+if ('serviceWorker' in navigator) {
+    let newWorker;
+    
+    // 监听新版本安装
+    navigator.serviceWorker.ready.then(reg => {
+        if (!reg) return;
+        reg.addEventListener('updatefound', () => {
+            newWorker = reg.installing;
+            if (!newWorker) return;
+            newWorker.addEventListener('statechange', () => {
+                // 当新 SW 安装完成但还在等待激活时，提示用户
+                if (newWorker.state === 'installed' && navigator.serviceWorker.controller) {
+                    showUpdatePrompt(newWorker);
+                }
+            });
+        });
+    }).catch(error => console.error("Error setting up 'updatefound' listener:", error));
+
+    // 检查页面加载时是否已经有等待中的新版本
+    navigator.serviceWorker.getRegistration().then(reg => {
+        if (reg && reg.waiting) {
+            showUpdatePrompt(reg.waiting);
+        }
+    }).catch(error => console.error("Error checking for waiting Service Worker:", error));
+
+    // 【核心修复】监听 Controller 变化，一旦新 SW 接管，立即刷新页面
+    let refreshing;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (refreshing) return;
+        console.log("Controller has changed, reloading page to apply updates.");
+        window.location.reload();
+        refreshing = true;
+    });
+}
+    await requestBackupCheck();
+
+
+
+}
 document.addEventListener('DOMContentLoaded', initializeApp);
