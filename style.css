@@ -357,7 +357,7 @@ li:hover .action-btn { opacity: 0.7; }
 /* ==========================================================================
    9. HEADER SELECTOR STYLES
    ========================================================================== */
-.header-select { margin-left: auto; padding: 8px 14px; padding-right: 36px; font-size: 15px; font-weight: 500; color: var(--text-color); background-color: var(--control-bg); border: 1px solid var(--control-border-color); border-radius: var(--border-radius-md); -webkit-appearance: none; -moz-appearance: none; appearance: none; background-image: url('data:image/svg+xml;charset=UTF-8,%3csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="%234A5568"%3e%3cpath fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" /%3e%3c/svg%3e'); background-repeat: no-repeat; background-position: right 12px center; background-size: 1.1em 1.1em; cursor: pointer; outline: none; transition: all 0.2s ease; }
+.header-select { margin-left: auto; padding: 8px 14px; padding-right: 36px; font-size: 15px; font-weight: 500; color: var(--text-color); background-color: var(--control-bg); border: 1px solid var(--control-border-color); border-radius: var(--border-radius-md); -webkit-appearance: none; -moz-appearance: none; appearance: none; background-image: url('data:image/svg+xml;charset=UTF-8,%3csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="%234A5568"%3e%3cpath fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" /%3e%3c/svg%3e'); background-repeat: no-repeat; background-position: right 12px center; background-size: 1.1em 1.1em; cursor: pointer; outline: none; transition: all 0.2s ease;     min-width: 140px; line-height: 1.4; }
 .header-select:hover { background-color: var(--control-hover-bg-color); border-color: var(--primary-color); }
 .header-select:focus { border-color: var(--primary-color); box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary-color) 25%, transparent); }
 [data-theme="dark"] .header-select { background-image: url('data:image/svg+xml;charset=UTF-8,%3csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="%23A0AEC0"%3e%3cpath fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd" /%3e%3c/svg%3e'); }
@@ -677,7 +677,10 @@ body { padding-bottom: 80px; }
     [data-theme="dark"] .note-display-text { background-color: rgba(0,0,0,0.2); }
 }
 
-.section { display: none; }
+.section { 
+    display: none; 
+    flex-direction: column; /* 【关键补充】为所有版块默认设置垂直排列 */
+}
 
 /* ==========================================================================
    20. DESKTOP-SPECIFIC LAYOUT OPTIMIZATIONS (PWA)
@@ -1926,10 +1929,20 @@ body { padding-bottom: 80px; }
 }
 
 /* ==========================================================================
-   41. DAILY METRICS STYLES (移植自插件)
+   41. DAILY METRICS STYLES (终极修复版)
    ========================================================================== */
 
-/* 视图切换器 (Tabs) */
+/* --- A. 基础版块行为 --- */
+/* 这个规则现在至关重要。它确保所有版块在显示时，
+   都是能在其父容器(.container)内正确缩放的Flex容器。*/
+.section {
+    display: none;          /* 默认隐藏 */
+    flex-direction: column; /* 内部元素垂直排列 */
+    min-width: 0;           /* 【关键修复 1】允许版块宽度收缩，小于其内容的固有宽度。这是切断传递链的第一步。*/
+    /* 当JS设置display:flex时，这个版块本身将成为一个合格的、可收缩的flex子项 */
+}
+
+/* --- B. 视图切换器 --- */
 .view-switcher {
     display: flex;
     justify-content: center;
@@ -1938,6 +1951,7 @@ body { padding-bottom: 80px; }
     border-radius: var(--border-radius-md);
     padding: 4px;
     border: 1px solid var(--control-border-color);
+    flex-shrink: 0; /* 防止切换器被意外压缩 */
 }
 .view-switcher button {
     flex: 1; padding: 8px 16px; border: none; background-color: transparent;
@@ -1949,24 +1963,24 @@ body { padding-bottom: 80px; }
     background-color: var(--container-bg); color: var(--primary-color); box-shadow: var(--shadow-sm);
 }
 
-/* 指标视图容器 */
-#daily-section {
-    min-height: 400px; 
-    display: flex;
-    flex-direction: column;
-}
+/* --- C. 指标视图的主容器 --- */
+/* 这是图表和可滚动表格的直接父容器。 */
 #daily-metrics-view {
-    display: flex;
-    flex-direction: column;
+    display: flex;          /* 它是一个Flex容器 */
+    flex-direction: column; /* 其子项（图表、表格）垂直排列 */
     gap: var(--spacing-lg);
-    flex-grow: 1;
+    flex-grow: 1;           /* 占据#daily-section中所有剩余的垂直空间 */
+    min-width: 0;           /* 【关键修复 2】再次应用收缩规则，确保它不会被自己的子项撑开 */
+    min-height: 0;          /* 允许它在flex布局中被压缩 */
+    overflow: hidden;       /* 【关键修复 3】创建BFC，提供最强力的“尺寸隔离”，这是最后一道防线 */
 }
 
-/* 图表容器 */
+/* --- D. 图表容器 --- */
 #metrics-chart-container {
     padding: var(--spacing-md); border-radius: var(--border-radius-lg);
     background-color: var(--control-bg); border: 1px solid var(--card-border-color);
     display: flex; flex-direction: column; height: 300px; 
+    flex-shrink: 0; /* 图表容器高度固定，不应被压缩 */
 }
 #metrics-chart { flex-grow: 1; min-height: 0; }
 .chart-controls {
@@ -1975,10 +1989,26 @@ body { padding-bottom: 80px; }
 }
 .chart-controls #chart-time-dimension { padding: 6px 10px; font-size: 14px; }
 
-/* 数据表格 */
-#metrics-data-table-container { overflow-x: auto; }
+
+/* --- E. 负责滚动的表格包裹层 --- */
+/* 这是最终实现滚动效果的元素。 */
+.metrics-table-wrapper {
+    flex-grow: 1;           /* 占据父容器中剩余的所有垂直空间 */
+    min-height: 0;          /* 允许其自身收缩 */
+    overflow-x: auto;       /* 【目标实现】当内容（表格）过宽时，显示水平滚动条 */
+    overflow-y: hidden;     /* 防止出现不必要的垂直滚动条 */
+}
+
+/* --- F. 表格自身 --- */
+#metrics-data-table-container {
+    /* 将滚动任务完全交给父级，自身不再处理溢出 */
+    overflow: visible; 
+}
 .metrics-table {
-    width: 100%; border-collapse: collapse; font-size: 14px; min-width: 600px;
+    width: 100%; 
+    min-width: 600px; /* 表格的最小宽度，这是需要滚动的根本原因 */
+    border-collapse: collapse; 
+    font-size: 14px;
 }
 .metrics-table th, .metrics-table td {
     padding: var(--spacing-sm); text-align: left;
@@ -1986,11 +2016,18 @@ body { padding-bottom: 80px; }
 }
 .metrics-table th {
     background-color: var(--control-bg); font-weight: 600;
-    position: sticky; top: 0; z-index: 2;
+    position: sticky; top: 0; z-index: 2; /* 固定表头 */
 }
 .metrics-table .metric-name-cell {
-    position: sticky; left: 0; background-color: var(--control-bg);
-    font-weight: 500; z-index: 1;
+    position: sticky;
+    left: 0; /* 固定第一列 */
+    background-color: var(--control-bg);
+    font-weight: 500;
+    z-index: 1;
+}
+.metrics-table th.metric-name-cell { z-index: 3; } /* 确保左上角单元格在最上层 */
+[data-theme="dark"] .metrics-table .metric-name-cell {
+    background-color: var(--control-bg);
 }
 .metrics-table .metric-name-cell .unit {
     color: var(--light-text-color); font-size: 0.9em; margin-left: 4px;
@@ -2009,17 +2046,18 @@ body { padding-bottom: 80px; }
     box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary-color) 25%, transparent);
 }
 
-/* 初始设置提示 */
+/* --- G. 初始设置提示 --- */
 #metrics-initial-setup-prompt {
     text-align: center; padding: var(--spacing-xl);
     background-color: var(--control-bg); border-radius: var(--border-radius-lg);
     border: 2px dashed var(--control-border-color);
+    flex-shrink: 0;
 }
 #metrics-initial-setup-prompt p {
     font-size: 16px; color: var(--light-text-color); margin-bottom: var(--spacing-lg);
 }
 
-/* 指标设置模态框 */
+/* --- H. 指标设置模态框 (无变化) --- */
 .metrics-settings-content {
     display: flex; flex-direction: column; gap: var(--spacing-lg);
     max-height: 60vh; overflow-y: auto; padding-right: var(--spacing-sm);
