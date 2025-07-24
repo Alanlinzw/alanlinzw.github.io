@@ -95,38 +95,76 @@
             </button>
         </div>
         <!-- Sections will be shown/hidden by JS -->
-        <div class="section" id="daily-section">
-            <div class="section-header">
-                <img src="images/icon-daily.svg" alt="每日">
-                <h2>每日清单 <span id="daily-title-date" class="header-date"></span></h2>
-            </div>
-<div id="daily-progress-tracker" class="progress-tracker">
-        <div class="progress-container">
-            <div class="progress-bar-fill"></div>
-            <span class="progress-percentage"></span>
-        </div>
-        <div class="progress-details">
-            <!-- Details will be populated by JavaScript -->
+<div class="section" id="daily-section">
+    <!-- 1. 区域头部 (包含新的设置按钮) -->
+    <div class="section-header">
+        <img src="images/icon-daily.svg" alt="每日">
+        <h2>每日清单 <span id="daily-title-date" class="header-date"></span></h2>
+        <div id="metrics-controls" class="section-header-main-actions" style="margin-left: auto; display: none;">
+            <button id="metrics-settings-btn" class="header-icon-btn" title="项目与指标设置">
+                <img src="images/icon-settings.svg" alt="Settings">
+            </button>
         </div>
     </div>
-            <div class="input-area">
-                <input type="text" id="new-daily-task-input" placeholder="输入任务...">
-                <!-- 【新增】周期选择下拉框 -->
-                <select id="new-daily-task-cycle-select" class="header-select" title="选择重复周期">
-                    <option value="daily" selected>每日</option>
-                    <option value="mon">每周一</option>
-                    <option value="tue">每周二</option>
-                    <option value="wed">每周三</option>
-                    <option value="thu">每周四</option>
-                    <option value="fri">每周五</option>
-                    <option value="sat">每周六</option>
-                    <option value="sun">每周日</option>
-                    <option value="once">不重复</option>
-                </select>
-                <button id="add-daily-task-btn" title="添加任务">+</button>
+
+    <!-- 2. 视图切换器 (任务/指标) -->
+    <div class="view-switcher">
+        <button id="show-tasks-view-btn" class="active" data-view="tasks">任务</button>
+        <button id="show-metrics-view-btn" data-view="metrics">指标</button>
+    </div>
+
+    <!-- 3. 任务视图容器 (使用插件的最新结构) -->
+    <div id="daily-tasks-view">
+        <!-- 注意：这里我们使用 PWA 版本的 progress-tracker，而不是插件的 progress-bar-container -->
+        <div id="daily-progress-tracker" class="progress-tracker">
+            <div class="progress-container">
+                <div class="progress-bar-fill"></div>
+                <span class="progress-percentage"></span>
             </div>
-            <ul id="daily-task-list" class="task-list"></ul>
+            <div class="progress-details"></div>
         </div>
+        <div class="input-area">
+            <input type="text" id="new-daily-task-input" placeholder="输入任务...">
+            <!-- PWA 版本的周期选择器已经很完善，我们保留它 -->
+            <select id="new-daily-task-cycle-select" class="header-select" title="选择重复周期">
+                <option value="daily" selected>每日</option>
+                <option value="mon">每周一</option>
+                <option value="tue">每周二</option>
+                <option value="wed">每周三</option>
+                <option value="thu">每周四</option>
+                <option value="fri">每周五</option>
+                <option value="sat">每周六</option>
+                <option value="sun">每周日</option>
+                <option value="once">不重复</option>
+            </select>
+            <button id="add-daily-task-btn" title="添加任务">+</button>
+        </div>
+        <ul id="daily-task-list" class="task-list"></ul>
+    </div>
+
+    <!-- 4. 指标视图容器 (从插件移植过来) -->
+    <div id="daily-metrics-view" class="hidden">
+        <div id="metrics-project-pills" class="tags-container"></div>
+        <div id="metrics-chart-container" class="hidden">
+            <div class="chart-controls">
+                <select id="chart-time-dimension" class="header-select">
+                    <option value="currentMonth">当月(日)</option>
+                    <option value="last30">近30天</option>
+                    <option value="currentYear">当年(月)</option>
+                </select>
+                <button id="refresh-chart-btn" class="header-icon-btn" title="刷新图表">
+                    <img src="images/icon-refresh.svg" alt="Refresh">
+                </button>
+            </div>
+            <canvas id="metrics-chart"></canvas>
+        </div>
+        <div id="metrics-data-table-container"></div>
+        <div id="metrics-initial-setup-prompt" class="hidden">
+            <p>您还没有设置任何追踪指标。</p>
+            <button id="go-to-metrics-settings-btn" class="custom-prompt-btn custom-prompt-confirm">开始设置</button>
+        </div>
+    </div>
+</div>
 
         <div class="section" id="monthly-section">
             <div class="section-header"> 
@@ -350,6 +388,7 @@
     <!-- Google API Client and Identity Services -->
     <script async defer src="https://apis.google.com/js/api.js"></script>
     <script async defer src="https://accounts.google.com/gsi/client"></script>
+
 
 
     <!-- 应用主逻辑 (已包含统计逻辑) -->
