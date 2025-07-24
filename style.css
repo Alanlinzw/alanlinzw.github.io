@@ -1924,3 +1924,119 @@ body { padding-bottom: 80px; }
     /* 作者文本需要一个比正文稍暗的颜色来区分层次 */
     color: #a0a0a0;
 }
+
+/* ==========================================================================
+   41. DAILY METRICS STYLES (移植自插件)
+   ========================================================================== */
+
+/* 视图切换器 (Tabs) */
+.view-switcher {
+    display: flex;
+    justify-content: center;
+    margin-bottom: var(--spacing-xl);
+    background-color: var(--control-bg);
+    border-radius: var(--border-radius-md);
+    padding: 4px;
+    border: 1px solid var(--control-border-color);
+}
+.view-switcher button {
+    flex: 1; padding: 8px 16px; border: none; background-color: transparent;
+    color: var(--light-text-color); font-size: 15px; font-weight: 600;
+    border-radius: var(--border-radius-sm); cursor: pointer; transition: all 0.2s ease;
+}
+.view-switcher button:hover { color: var(--text-color); }
+.view-switcher button.active {
+    background-color: var(--container-bg); color: var(--primary-color); box-shadow: var(--shadow-sm);
+}
+
+/* 指标视图容器 */
+#daily-section {
+    min-height: 400px; 
+    display: flex;
+    flex-direction: column;
+}
+#daily-metrics-view {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-lg);
+    flex-grow: 1;
+}
+
+/* 图表容器 */
+#metrics-chart-container {
+    padding: var(--spacing-md); border-radius: var(--border-radius-lg);
+    background-color: var(--control-bg); border: 1px solid var(--card-border-color);
+    display: flex; flex-direction: column; height: 300px; 
+}
+#metrics-chart { flex-grow: 1; min-height: 0; }
+.chart-controls {
+    display: flex; justify-content: flex-end;
+    gap: var(--spacing-sm); margin-bottom: var(--spacing-sm);
+}
+.chart-controls #chart-time-dimension { padding: 6px 10px; font-size: 14px; }
+
+/* 数据表格 */
+#metrics-data-table-container { overflow-x: auto; }
+.metrics-table {
+    width: 100%; border-collapse: collapse; font-size: 14px; min-width: 600px;
+}
+.metrics-table th, .metrics-table td {
+    padding: var(--spacing-sm); text-align: left;
+    border: 1px solid var(--card-border-color); white-space: nowrap;
+}
+.metrics-table th {
+    background-color: var(--control-bg); font-weight: 600;
+    position: sticky; top: 0; z-index: 2;
+}
+.metrics-table .metric-name-cell {
+    position: sticky; left: 0; background-color: var(--control-bg);
+    font-weight: 500; z-index: 1;
+}
+.metrics-table .metric-name-cell .unit {
+    color: var(--light-text-color); font-size: 0.9em; margin-left: 4px;
+}
+.metrics-table td { background-color: var(--card-bg); }
+.metrics-table input.metric-value-input {
+    width: 100%; min-width: 60px; border: 1px solid transparent;
+    background-color: transparent; border-radius: var(--border-radius-sm);
+    padding: 6px; font-family: inherit; font-size: 14px;
+    color: var(--text-color); text-align: center; outline: none;
+    transition: all 0.2s ease;
+}
+.metrics-table input.metric-value-input:hover { border-color: var(--control-border-color); }
+.metrics-table input.metric-value-input:focus {
+    background-color: var(--container-bg); border-color: var(--primary-color);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--primary-color) 25%, transparent);
+}
+
+/* 初始设置提示 */
+#metrics-initial-setup-prompt {
+    text-align: center; padding: var(--spacing-xl);
+    background-color: var(--control-bg); border-radius: var(--border-radius-lg);
+    border: 2px dashed var(--control-border-color);
+}
+#metrics-initial-setup-prompt p {
+    font-size: 16px; color: var(--light-text-color); margin-bottom: var(--spacing-lg);
+}
+
+/* 指标设置模态框 */
+.metrics-settings-content {
+    display: flex; flex-direction: column; gap: var(--spacing-lg);
+    max-height: 60vh; overflow-y: auto; padding-right: var(--spacing-sm);
+}
+.metric-project-group {
+    padding: var(--spacing-md); border: 1px solid var(--card-border-color);
+    border-radius: var(--border-radius-md); background-color: var(--card-bg);
+}
+.metric-project-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: var(--spacing-md);
+}
+.metric-project-header h4 { margin: 0; font-size: 16px; }
+.metric-list {
+    list-style: none; padding-left: var(--spacing-md); margin: 0;
+    display: flex; flex-direction: column; gap: var(--spacing-sm);
+}
+.metric-list-item {
+    display: flex; justify-content: space-between; align-items: center; font-size: 15px;
+}
