@@ -690,6 +690,7 @@ async function handleGoogleAuthCallback() {
     }
 }
 
+
 // ========================================================================
 // 2. 状态变量和常量定义
 // (保持你现有的这部分代码不变)
@@ -3895,6 +3896,56 @@ function exitSortMode() {
     if (highlightedItem) { highlightedItem.classList.remove('is-sorting'); }
 }
 
+async function handleNotionCallback() {
+    const urlParams = new URLSearchParams(window.location.search);
+    const authCode = urlParams.get('code');
+
+    if (authCode) {
+        // 使用一个固定的、权威的PWA URL来清理地址栏
+        const PWA_URL = 'https://alanlinzw.github.io/'; // 你的PWA的固定URL
+        window.history.replaceState({}, document.title, PWA_URL);
+
+        // 显示加载提示
+        openCustomPrompt({
+            title: "正在完成Notion授权...",
+            message: "请稍候，正在通过安全代理验证您的授权信息。",
+            inputType: 'none',
+            hideConfirmButton: true,
+            hideCancelButton: true
+        });
+
+        try {
+            // 定义你的Worker代理URL
+            const PROXY_URL = 'https://notion-auth-proxy.martinlinzhiwu.workers.dev/exchange-token';
+
+            // 通过代理，使用POST方法在请求体中发送code
+            const response = await fetch(PROXY_URL, {
+                method: "POST",
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ code: authCode })
+            });
+
+            const tokenData = await response.json();
+
+            // 检查代理返回的响应是否成功
+            if (!response.ok || tokenData.error) {
+                throw new Error(tokenData.error || "从代理服务器获取Token失败。请检查Worker日志。");
+            }
+            
+            // 存储获取到的token
+            await db.set('notion_access_token', tokenData.access_token);
+            await db.set('notion_workspace_id', tokenData.workspace_id);
+            
+            // 关闭加载提示，进入下一步：选择页面
+            closeCustomPrompt();
+            await selectNotionParentPage(true); // 传入true表示这是首次设置
+
+        } catch (error) {
+            closeCustomPrompt();
+            openCustomPrompt({ title: "Notion授权失败", message: error.message, inputType: 'none', confirmText: '好的' });
+        }
+    }
+}
 
 async function updateNotificationButtonUI() {
     if (!toggleNotificationsBtn) return;
