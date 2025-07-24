@@ -674,6 +674,9 @@ let aiSettingsBtn, aiAssistantBtn, aiAssistantModal, aiAssistantCloseBtn,
     aiReportLoading, aiReportContent, aiReportCopyBtn, aiReportBackBtn;
 // --- END OF REPLACEMENT ---
 
+let activeMetricProjectId = null;
+let metricsChartInstance = null;
+
 const AUTO_SYNC_DELAY = 5000; // 延迟5秒 (5000毫秒)
 const faqs = [
     {
@@ -861,6 +864,10 @@ const dailyQuotes = [
 // (保持你现有的这部分代码不变)
 // ========================================================================
 let statsBtn, statsModal, statsModalCloseBtn, faqBtn, faqModal, faqModalCloseBtn, faqListDiv, mainSearchInput, dailyTitleDate, themeToggleBtn, feedbackBtn, donateBtn, dailyTaskList, monthlyTaskList, futureTaskList, ledgerList, monthlyHeaderTitle, sortMonthlyByPriorityBtn, ledgerHeaderTitle, monthlyInputArea, ledgerInputArea, newDailyTaskInput, addDailyTaskBtn, newMonthlyTaskInput, newMonthlyTagsInput, addMonthlyTaskBtn, newFutureTaskInput, futureTaskDateTimeInput, addFutureTaskBtn, ledgerDateInput, ledgerItemInput, ledgerAmountInput, ledgerPaymentInput, ledgerDetailsInput, addLedgerBtn, monthlyTagsContainer, ledgerTagsContainer, ledgerSummaryContainer, monthlyHistoryBtn, ledgerHistoryBtn, historyModal, historyModalCloseBtn, historyModalTitle, historyPrevYearBtn, historyNextYearBtn, historyCurrentYearSpan, historyMonthsGrid, donateModal, modalCloseBtn, featuresBtn, featuresModal, featuresModalCloseBtn, featuresListUl, exportMonthlyHistoryBtn, importMonthlyBtn, downloadMonthlyTemplateBtn, importMonthlyFileInput, exportLedgerHistoryBtn, importLedgerBtn, downloadLedgerTemplateBtn, importLedgerFileInput, toggleNotificationsBtn, customPromptModal, customPromptTitleEl, customPromptMessageEl, customPromptInputContainer, customPromptConfirmBtn, customPromptCancelBtn, customPromptCloseBtn, setBudgetBtn, annualReportBtn, annualReportModal, annualReportCloseBtn, annualReportTitle, annualReportPrevYearBtn, annualReportNextYearBtn, annualReportCurrentYearSpan, annualReportSummaryDiv, annualReportDetailsDiv, currencyPickerBtn, syncDriveBtn, syncStatusSpan, bottomNav, allSections, isHistoryModalOpen;
+let viewSwitcher, showTasksViewBtn, showMetricsViewBtn, dailyTasksView, dailyMetricsView,
+    metricsControls, metricsSettingsBtn, metricsProjectPills, metricsChartContainer,
+    chartTimeDimension, refreshChartBtn, metricsChartCanvas, metricsDataTableContainer,
+    metricsInitialSetupPrompt, goToMetricsSettingsBtn;
 
 // ========================================================================
 // 4. 核心功能函数定义
@@ -1078,19 +1085,486 @@ async function loadTasks(callback) {
     
     if (data && typeof data === 'object') {
         allTasks = data;
-        const defaultStructure = { daily: [], monthly: [], future: [], ledger: [], history: {}, ledgerHistory: {}, budgets: {}, currencySymbol: '$', lastUpdatedLocal: 0, lastDailyResetDate: '1970-01-01' };
+        const defaultStructure = { daily: [], monthly: [], future: [], ledger: [], history: {}, ledgerHistory: {}, budgets: {}, currencySymbol: '$', lastUpdatedLocal: 0, lastDailyResetDate: '1970-01-01', metrics: { projects: [], definitions: [], data: {} } };
         for (const key in defaultStructure) {
             if (!allTasks.hasOwnProperty(key)) {
                 allTasks[key] = defaultStructure[key];
             }
         }
     } else {
-        allTasks = { daily: [], monthly: [], future: [], ledger: [], history: {}, ledgerHistory: {}, budgets: {}, currencySymbol: '$', lastUpdatedLocal: 0, lastDailyResetDate: '1970-01-01' };
+        allTasks = { daily: [], monthly: [], future: [], ledger: [], history: {}, ledgerHistory: {}, budgets: {}, currencySymbol: '$', lastUpdatedLocal: 0, lastDailyResetDate: '1970-01-01', metrics: { projects: [], definitions: [], data: {} } };
         await saveTasks();
     }
     if (callback) callback();
 }
 
+function renderDailySection() {
+    const isMetricsView = showMetricsViewBtn.classList.contains('active');
+
+    dailyTasksView.classList.toggle('hidden', isMetricsView);
+    dailyMetricsView.classList.toggle('hidden', !isMetricsView);
+    metricsControls.style.display = isMetricsView ? 'flex' : 'none';
+
+    if (isMetricsView) {
+        renderMetricsView();
+    } else {
+        // 【核心修正】在渲染任务视图时，应用搜索过滤
+        const searchActive = currentSearchTerm.length > 0;
+        const dailyDataToRender = searchActive
+            ? allTasks.daily.filter(task => 
+                task.text.toLowerCase().includes(currentSearchTerm) ||
+                (task.note && task.note.toLowerCase().includes(currentSearchTerm))
+              )
+            : allTasks.daily;
+        renderDailyTasks(dailyDataToRender);
+    }
+}
+
+function renderMetricsView() {
+    // 1. 从主数据源获取项目和指标的定义
+    const { projects, definitions } = allTasks.metrics;
+
+    // 2. 检查是否存在任何已定义的指标。如果没有，则显示初始设置提示。
+    if (projects.length === 0 || definitions.length === 0) {
+        metricsInitialSetupPrompt.classList.remove('hidden');
+        metricsProjectPills.classList.add('hidden');
+        metricsChartContainer.classList.add('hidden');
+        metricsDataTableContainer.classList.add('hidden');
+        return;
+    }
+
+    // 3. 如果有数据，则隐藏初始设置提示，并显示主UI组件
+    metricsInitialSetupPrompt.classList.add('hidden');
+    metricsProjectPills.classList.remove('hidden');
+    metricsChartContainer.classList.remove('hidden');
+    metricsDataTableContainer.classList.remove('hidden');
+
+    // 4. 初始化或确保当前有一个被选中的项目ID
+    if (!activeMetricProjectId && projects.length > 0) {
+        activeMetricProjectId = projects[0].id;
+    }
+
+    // 5. 【核心修复】使用 requestAnimationFrame 推迟渲染
+    // 这可以确保浏览器在执行 DOM 操作前，已经完成了对新显示元素的样式计算和绘制
+    requestAnimationFrame(() => {
+        // a. 填充并同步时间维度下拉菜单的状态
+        populateHistoryMonthsSelector(); 
+        
+        // b. 渲染顶部的项目筛选胶囊按钮
+        renderMetricProjectPills();
+        
+        // c. 渲染数据输入表格
+        renderMetricsDataTable();
+        
+        // d. 渲染折线图
+        renderMetricsChart();
+    });
+}
+
+function renderMetricProjectPills() {
+    metricsProjectPills.innerHTML = '';
+    allTasks.metrics.projects.forEach(proj => {
+        const btn = document.createElement('button');
+        btn.className = 'tag-button';
+        btn.textContent = proj.name;
+        btn.dataset.projectId = proj.id;
+        if (proj.id === activeMetricProjectId) {
+            btn.classList.add('active');
+        }
+        btn.addEventListener('click', () => {
+            activeMetricProjectId = proj.id;
+            renderMetricsView();
+        });
+        metricsProjectPills.appendChild(btn);
+    });
+}
+
+function renderMetricsDataTable() {
+    const timeDimension = document.getElementById('chart-time-dimension').value;
+const metricsForProject = allTasks.metrics.definitions.filter(def => def.projectId === activeMetricProjectId);
+    if (metricsForProject.length === 0) {
+        metricsDataTableContainer.innerHTML = '<p style="text-align:center; color: var(--light-text-color);">此项目下无指标，请在设置中添加。</p>';
+        return;
+    }
+
+    let year, month, daysInMonth;
+    
+    if (timeDimension.match(/^\d{4}-\d{2}$/)) { // 如果是 "YYYY-MM" 格式的历史月份
+        const parts = timeDimension.split('-');
+        year = parseInt(parts[0], 10);
+        month = parseInt(parts[1], 10) - 1;
+    } else { // 否则，视为查看当月 ('current')
+        const today = new Date();
+        year = today.getFullYear();
+        month = today.getMonth();
+    }
+    
+    daysInMonth = new Date(year, month + 1, 0).getDate();
+    
+    // 【核心修正3】修改表头生成逻辑
+    let tableHTML = '<table class="metrics-table"><thead><tr><th>指标</th>';
+    for (let i = 1; i <= daysInMonth; i++) {
+        // 将纯数字 'i' 替换为 'MM-DD' 格式
+        const dayStr = String(i).padStart(2, '0');
+        const monthStr = String(month + 1).padStart(2, '0');
+        tableHTML += `<th>${monthStr}-${dayStr}</th>`;
+    }
+    tableHTML += '</tr></thead><tbody>';
+
+    const currentMonthStr = `${year}-${String(month + 1).padStart(2, '0')}`;
+
+    metricsForProject.forEach(metric => {
+        tableHTML += `<tr><td class="metric-name-cell">${metric.name}<span class="unit">(${metric.unit})</span></td>`;
+        for (let i = 1; i <= daysInMonth; i++) {
+            const dateStr = `${currentMonthStr}-${String(i).padStart(2, '0')}`;
+            const dataEntry = (allTasks.metrics.data[metric.id] || []).find(d => d.date === dateStr);
+            const value = dataEntry ? dataEntry.value : '';
+            // 数据单元格的逻辑保持不变
+            tableHTML += `<td><input type="number" class="metric-value-input" data-metric-id="${metric.id}" data-date="${dateStr}" value="${value}" step="any"></td>`;
+        }
+        tableHTML += '</tr>';
+    });
+
+    tableHTML += '</tbody></table>';
+    metricsDataTableContainer.innerHTML = tableHTML;
+}
+
+/**
+ * 渲染折线图
+ */
+function renderMetricsChart() {
+    if (metricsChartInstance) {
+        metricsChartInstance.destroy();
+        metricsChartInstance = null;
+    }
+    
+    const metricsForProject = allTasks.metrics.definitions.filter(def => def.projectId === activeMetricProjectId);
+    if (metricsForProject.length === 0) {
+        metricsChartContainer.classList.add('hidden');
+        return;
+    } else {
+        metricsChartContainer.classList.remove('hidden');
+    }
+
+    // 【核心修正】调用时只传递一个参数
+    const { labels, datasetsData } = prepareChartData(metricsForProject);
+
+    const chartColors = ['#3B82F6', '#14B8A6', '#F59E0B', '#8B5CF6', '#EF4444', '#6366F1'];
+
+    const datasets = metricsForProject.map((metric, index) => {
+        const color = chartColors[index % chartColors.length];
+        return {
+            label: `${metric.name} (${metric.unit})`,
+            data: datasetsData[metric.id],
+            borderColor: color,
+            backgroundColor: color + '33',
+            fill: false,
+            tension: 0.1,
+            spanGaps: true,
+        };
+    });
+
+    if (!metricsChartCanvas) {
+        console.error("图表渲染失败: 找不到 canvas 元素。");
+        return;
+    }
+    const ctx = metricsChartCanvas.getContext('2d');
+    if (!ctx) {
+        console.error("图表渲染失败: 无法获取 canvas 的 2D 上下文。");
+        return;
+    }
+
+    metricsChartInstance = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: datasets
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: {
+                    grid: { color: 'rgba(128, 128, 128, 0.1)' },
+                    ticks: { color: 'var(--light-text-color)' }
+                },
+                y: {
+                    grid: { color: 'rgba(128, 128, 128, 0.1)' },
+                    ticks: { color: 'var(--light-text-color)' },
+                    beginAtZero: true
+                }
+            },
+            plugins: {
+                legend: {
+                    position: 'top',
+                    labels: { color: 'var(--text-color)' }
+                }
+            }
+        }
+    });
+}
+
+function prepareChartData(metrics) { // 【核心修正】移除了第二个参数 'timeDimension'
+    const timeDimension = document.getElementById('chart-time-dimension').value;
+    const labels = [];
+    const datasetsData = {};
+    metrics.forEach(m => { datasetsData[m.id] = []; });
+
+    let startDate, endDate;
+    
+    // --- 1. 根据时间维度，确定处理方式和标签 ---
+    if (timeDimension.match(/^\d{4}-\d{2}$/)) { // 历史月份视图，例如 "2024-05"
+        const parts = timeDimension.split('-');
+        const year = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10) - 1;
+        startDate = new Date(year, month, 1);
+        endDate = new Date(year, month + 1, 0);
+
+        let currentDate = new Date(startDate);
+        while (currentDate <= endDate) {
+            labels.push(currentDate.toISOString().split('T')[0]);
+            currentDate.setDate(currentDate.getDate() + 1);
+        }
+
+    } else if (timeDimension === 'last30') { // 近30天视图
+        endDate = new Date();
+        startDate = new Date();
+        startDate.setDate(endDate.getDate() - 29);
+
+        let currentDate = new Date(startDate);
+        while (currentDate <= endDate) {
+            labels.push(currentDate.toISOString().split('T')[0]);
+            currentDate.setDate(currentDate.getDate() + 1);
+        }
+
+    } else if (timeDimension === 'currentYear') { // 当年视图
+        const year = new Date().getFullYear();
+        
+        for (let i = 0; i < 12; i++) {
+            labels.push(`${year}-${String(i + 1).padStart(2, '0')}`);
+        }
+
+        metrics.forEach(metric => {
+            const metricData = allTasks.metrics.data[metric.id] || [];
+            
+            labels.forEach(monthLabel => {
+                const valuesInMonth = metricData
+                    .filter(d => d.date.startsWith(monthLabel))
+                    .map(d => d.value);
+
+                if (valuesInMonth.length > 0) {
+                    const sum = valuesInMonth.reduce((acc, val) => acc + val, 0);
+                    const avg = sum / valuesInMonth.length;
+                    datasetsData[metric.id].push(parseFloat(avg.toFixed(2)));
+                } else {
+                    datasetsData[metric.id].push(null);
+                }
+            });
+        });
+        
+        return { labels, datasetsData };
+
+    } else { // 默认是 'currentMonth' (当月视图)
+        const today = new Date();
+        const year = today.getFullYear();
+        const month = today.getMonth();
+        startDate = new Date(year, month, 1);
+        endDate = new Date(year, month + 1, 0);
+
+        let currentDate = new Date(startDate);
+        while (currentDate <= endDate) {
+            labels.push(currentDate.toISOString().split('T')[0]);
+            currentDate.setDate(currentDate.getDate() + 1);
+        }
+    }
+
+    // --- 2. 为所有按“日”查看的视图填充数据 ---
+    labels.forEach(dateStr => {
+        metrics.forEach(metric => {
+            const entry = (allTasks.metrics.data[metric.id] || []).find(d => d.date === dateStr);
+            datasetsData[metric.id].push(entry ? entry.value : null);
+        });
+    });
+
+    return { labels, datasetsData };
+}
+
+function openMetricsSettingsModal() {
+    // 【核心修改1】将内容生成逻辑移入一个局部函数或直接使用
+    const generateContent = () => {
+        let contentHtml = '<div class="metrics-settings-content">';
+        // ... (与 refreshMetricsSettingsModalContent 中完全相同的 HTML 生成逻辑)
+        allTasks.metrics.projects.forEach(proj => {
+            contentHtml += `
+            <div class="metric-project-group">
+                <div class="metric-project-header">
+                    <h4 class="editable-metric-name" data-type="project" data-id="${proj.id}" title="点击编辑项目名称">${proj.name}</h4>
+                    <button class="action-btn delete-btn" data-project-id="${proj.id}" title="删除此项目">×</button>
+                </div>
+                <ul class="metric-list">`;
+        
+        allTasks.metrics.definitions.filter(def => def.projectId === proj.id).forEach(metric => {
+            contentHtml += `
+                <li class="metric-list-item">
+                    <span class="editable-metric-name" data-type="metric" data-id="${metric.id}" title="点击编辑指标名称">${metric.name} (${metric.unit})</span>
+                    <button class="action-btn delete-btn" data-metric-id="${metric.id}" title="删除此指标">×</button>
+                </li>`;
+        });
+
+        contentHtml += `
+                </ul>
+                <div class="input-area" style="margin-top: 15px;">
+                    <input type="text" class="new-metric-name-input" placeholder="新指标名称..." data-project-id="${proj.id}">
+                    <input type="text" class="new-metric-unit-input" placeholder="单位(如:kg)" data-project-id="${proj.id}">
+                    <button class="add-metric-btn" data-project-id="${proj.id}">+</button>
+                </div>
+            </div>`;
+        });
+        contentHtml += `
+        </div>
+        <div class="input-area" style="margin-top: 20px; border-top: 1px solid var(--card-border-color); padding-top: 20px;">
+             <input type="text" id="new-metric-project-input" placeholder="添加新项目 (如: 工作, 健康)...">
+             <button id="add-metric-project-btn">+</button>
+        </div>`;
+        return contentHtml;
+    };
+
+    const attachEventListeners = () => {
+        const modalContent = document.querySelector('.metrics-settings-content');
+        if (!modalContent) return;
+        
+        // 使用事件委托处理所有点击事件
+        modalContent.addEventListener('click', (e) => {
+            const target = e.target;
+
+            // 处理编辑
+            if (target.classList.contains('editable-metric-name')) {
+                handleMetricNameEdit(target);
+                return;
+            }
+
+            const button = target.closest('button');
+            if (!button) return;
+
+            // 处理添加指标
+            if (button.classList.contains('add-metric-btn')) {
+                const projectId = button.dataset.projectId;
+                const nameInput = document.querySelector(`.new-metric-name-input[data-project-id="${projectId}"]`);
+                const unitInput = document.querySelector(`.new-metric-unit-input[data-project-id="${projectId}"]`);
+                if (nameInput.value.trim() && unitInput.value.trim()) {
+                    allTasks.metrics.definitions.push({ id: `m_${Date.now()}`, projectId, name: nameInput.value.trim(), unit: unitInput.value.trim() });
+                    saveTasks();
+                    refreshMetricsSettingsModalContent(); // 原地刷新
+                    attachEventListeners(); // 重新绑定事件
+                }
+                return;
+            }
+
+            // 处理删除指标
+            if (button.dataset.metricId) {
+                const metricId = button.dataset.metricId;
+                allTasks.metrics.definitions = allTasks.metrics.definitions.filter(d => d.id !== metricId);
+                delete allTasks.metrics.data[metricId];
+                saveTasks();
+                refreshMetricsSettingsModalContent();
+                attachEventListeners();
+                return;
+            }
+
+            // 处理删除项目
+            if (button.dataset.projectId) {
+                const projectId = button.dataset.projectId;
+                allTasks.metrics.projects = allTasks.metrics.projects.filter(p => p.id !== projectId);
+                allTasks.metrics.definitions = allTasks.metrics.definitions.filter(d => d.projectId !== projectId);
+                saveTasks();
+                refreshMetricsSettingsModalContent();
+                attachEventListeners();
+                return;
+            }
+        });
+
+        const addProjectBtn = document.getElementById('add-metric-project-btn');
+        if(addProjectBtn) {
+            addProjectBtn.onclick = () => {
+                const input = document.getElementById('new-metric-project-input');
+                const name = input.value.trim();
+                if (name) {
+                    allTasks.metrics.projects.push({ id: `proj_${Date.now()}`, name });
+                    saveTasks();
+                    refreshMetricsSettingsModalContent(); // 原地刷新
+                    attachEventListeners(); // 重新绑定事件
+                }
+            };
+        }
+    };
+function saveMetricValue(metricId, date, value) {
+    if (!allTasks.metrics.data[metricId]) {
+        allTasks.metrics.data[metricId] = [];
+    }
+
+    const dataIndex = allTasks.metrics.data[metricId].findIndex(d => d.date === date);
+    const numericValue = parseFloat(value);
+
+    if (isNaN(numericValue) || value.trim() === '') {
+        if (dataIndex > -1) {
+            allTasks.metrics.data[metricId].splice(dataIndex, 1);
+        }
+    } else {
+        if (dataIndex > -1) {
+            allTasks.metrics.data[metricId][dataIndex].value = numericValue;
+        } else {
+            allTasks.metrics.data[metricId].push({ date, value: numericValue });
+        }
+    }
+    
+    // 【核心修改】不再调用 renderMetricsChart()，只调用 saveTasks()
+    saveTasks();
+}
+
+function populateHistoryMonthsSelector() {
+    const selector = document.getElementById('chart-time-dimension');
+    if (!selector) return;
+
+    // 1. 清理旧的历史月份选项和可能存在的分隔线
+    selector.querySelectorAll('option[data-history-month], option[disabled]').forEach(opt => opt.remove());
+
+    const monthsWithData = new Set();
+    Object.values(allTasks.metrics.data).flat().forEach(entry => {
+        monthsWithData.add(entry.date.substring(0, 7));
+    });
+
+    const sortedMonths = Array.from(monthsWithData).sort().reverse();
+    
+    if (sortedMonths.length > 0) {
+        // 添加分隔线
+        const separator = document.createElement('option');
+        separator.disabled = true;
+        separator.textContent = '──────────';
+        selector.appendChild(separator);
+
+        // 添加历史月份选项
+        sortedMonths.forEach(monthKey => {
+            const option = document.createElement('option');
+            option.value = monthKey;
+            option.textContent = `${monthKey} (历史)`;
+            option.dataset.historyMonth = true;
+            selector.appendChild(option);
+        });
+    }
+
+    // 【核心同步逻辑】根据全局状态变量，设置下拉菜单的当前选中值
+    // 如果 selectedMetricsDisplayMonth 是 'current'，则映射到 'currentMonth'
+    const targetValue = selectedMetricsDisplayMonth === 'current' ? 'currentMonth' : selectedMetricsDisplayMonth;
+    
+    // 检查这个值是否存在于下拉菜单中
+    if (selector.querySelector(`option[value="${targetValue}"]`)) {
+        selector.value = targetValue;
+    } else {
+        // 如果值不存在（例如，一个没有数据的历史月份），则重置为当月
+        selector.value = 'currentMonth';
+        selectedMetricsDisplayMonth = 'current'; // 同步状态变量
+    }
+}
 
 
 async function saveTasks() {
@@ -1479,7 +1953,7 @@ function renderAllLists() {
           ) 
         : baseLedgerData;
 
-    renderDailyTasks(dailyData);
+    renderDailySection();
     renderMonthlyTasks(monthlyData, selectedMonthlyDisplayMonth !== 'current');
     renderMonthlyTags(monthlyData);
     renderFutureTasks(futureData);
@@ -4821,6 +5295,43 @@ if (exportToNotionBtn) {
     exportToNotionBtn.addEventListener('click', handleExportToNotionClick);
 }
 
+    // 【新增】每日清单的视图切换
+    if (viewSwitcher) {
+        viewSwitcher.addEventListener('click', (e) => {
+            if (e.target.tagName === 'BUTTON') {
+                viewSwitcher.querySelector('.active').classList.remove('active');
+                e.target.classList.add('active');
+                renderDailySection();
+            }
+        });
+    }
+
+    // 【新增】指标功能相关事件
+    if (metricsSettingsBtn) {
+        metricsSettingsBtn.addEventListener('click', openMetricsSettingsModal);
+    }
+    if (goToMetricsSettingsBtn) {
+        goToMetricsSettingsBtn.addEventListener('click', openMetricsSettingsModal);
+    }
+    if (metricsDataTableContainer) {
+        metricsDataTableContainer.addEventListener('change', (e) => {
+            if (e.target.classList.contains('metric-value-input')) {
+                const { metricId, date } = e.target.dataset;
+                saveMetricValue(metricId, date, e.target.value);
+            }
+        });
+    }
+    if (chartTimeDimension) {
+        chartTimeDimension.addEventListener('change', () => {
+            renderMetricsDataTable();
+            renderMetricsChart();
+        });
+    }
+    if (refreshChartBtn) {
+        refreshChartBtn.addEventListener('click', renderMetricsChart);
+    }
+}
+
 // 【新增】绑定备份与恢复的事件
     if (backupRestoreBtn) {
         backupRestoreBtn.addEventListener('click', () => {
@@ -5896,7 +6407,24 @@ if (!statsModal) {
             // 注意：关闭按钮的事件监听器在 bindEventListeners 中统一设置
         }
     }
+    // 【新增】获取每日清单视图切换相关元素
+    viewSwitcher = document.querySelector('.view-switcher');
+    showTasksViewBtn = document.getElementById('show-tasks-view-btn');
+    showMetricsViewBtn = document.getElementById('show-metrics-view-btn');
+    dailyTasksView = document.getElementById('daily-tasks-view');
+    dailyMetricsView = document.getElementById('daily-metrics-view');
 
+    // 【新增】获取指标视图内部元素
+    metricsControls = document.getElementById('metrics-controls');
+    metricsSettingsBtn = document.getElementById('metrics-settings-btn');
+    metricsProjectPills = document.getElementById('metrics-project-pills');
+    metricsChartContainer = document.getElementById('metrics-chart-container');
+    chartTimeDimension = document.getElementById('chart-time-dimension');
+    refreshChartBtn = document.getElementById('refresh-chart-btn');
+    metricsChartCanvas = document.getElementById('metrics-chart');
+    metricsDataTableContainer = document.getElementById('metrics-data-table-container');
+    metricsInitialSetupPrompt = document.getElementById('metrics-initial-setup-prompt');
+    goToMetricsSettingsBtn = document.getElementById('go-to-metrics-settings-btn');
 
     faqBtn = document.getElementById('faq-btn');
     faqModal = document.getElementById('faq-modal');
