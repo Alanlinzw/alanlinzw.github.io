@@ -147,6 +147,9 @@
         <div id="metrics-project-pills" class="tags-container"></div>
         <div id="metrics-chart-container" class="hidden">
             <div class="chart-controls">
+        <button id="metrics-history-btn" class="header-icon-btn" title="选择历史月份">
+            <img src="images/icon-calendar.svg" alt="Calendar">
+        </button>
                 <select id="chart-time-dimension" class="header-select">
                     <option value="currentMonth">当月(日)</option>
                     <option value="last30">近30天</option>
@@ -158,7 +161,11 @@
             </div>
             <canvas id="metrics-chart"></canvas>
         </div>
-        <div id="metrics-data-table-container"></div>
+    <div class="metrics-table-wrapper"> 
+        <div id="metrics-data-table-container">
+            <!-- 表格将由JS动态生成 -->
+        </div>
+    </div>
         <div id="metrics-initial-setup-prompt" class="hidden">
             <p>您还没有设置任何追踪指标。</p>
             <button id="go-to-metrics-settings-btn" class="custom-prompt-btn custom-prompt-confirm">开始设置</button>
@@ -385,6 +392,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script src="xlsx.full.min.js"></script>
     <script src="Sortable.min.js"></script>
+    <script src="chart.umd.min.js"></script>
     <!-- Google API Client and Identity Services -->
     <script async defer src="https://apis.google.com/js/api.js"></script>
     <script async defer src="https://accounts.google.com/gsi/client"></script>
@@ -417,7 +425,7 @@
 
                 const activeSection = document.getElementById(sectionIdToShow);
                 if (activeSection) {
-                    activeSection.style.display = 'block';
+                    activeSection.style.display = 'flex';
                     const container = document.querySelector('.container');
                     if (container) {
                         if (!document.documentElement.classList.contains('dashboard-mode') && window.innerWidth >= 769 && document.body.style.width === '700px'){
