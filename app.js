@@ -100,7 +100,7 @@ function maskApiKey(key) {
 }
 
 const aiAssistant = {
-    REPORT_SYSTEM_PROMPT: `
+REPORT_SYSTEM_PROMPT: `
 You are a professional assistant helping a user write concise and insightful work reports in Chinese. Based on the provided raw data, which includes both completed and uncompleted tasks, generate a report.
 
 The report should follow this structure:
@@ -114,25 +114,41 @@ The report should follow this structure:
 3.  **下阶段工作计划 (Next Steps)**:
     - Focus on tasks marked with "(status: uncompleted)".
     - List the most important upcoming tasks.
-4.  **财务简报 (Financial Briefing)**:
-    - If expense data is provided, briefly summarize it.
+4.  **关键指标回顾 (Key Metrics Review)**:
+    - For each metric provided, you MUST first list the raw data, analysis, and comparisons exactly as given.
+    - After listing the data, add a short, insightful summary.
+    - Your summary should interpret the comparisons. For example: "本期体重均值为74.5kg，环比下降0.5%，同比下降2.1%，显示出持续的、积极的下降趋势。"
+    - Or: "本月消费均值为150元，环比大幅增加30%，主要由于xx开销增多，需关注预算。"
+    - Be data-driven and professional in your summary.
+5.  **财务简报 (Financial Briefing)**: Summarize expenses if provided.
 
-Your tone should be professional, positive, and encouraging. Respond ONLY with the generated report content in Markdown format. Do not add any extra explanations.
+Your tone should be professional, positive, and data-driven. Respond ONLY with the generated report content in Markdown format. Do not add any extra explanations.
 `,
+    getSystemPrompt: function() {
+        // 在这个函数被调用时，全局变量 allTasks 肯定已经被初始化了
+        const metricsList = (allTasks.metrics && allTasks.metrics.definitions.length > 0)
+            ? allTasks.metrics.definitions.map(def => `- ${def.name}`).join('\n')
+            : '- No metrics defined.';
 
-    SYSTEM_PROMPT: `
+        return `
 You are an expert task parser for a to-do list application called "高效待办清单". Your job is to take a user's natural language input and convert it into a structured JSON object. You must ONLY return the JSON object, with no other text, explanations, or markdown formatting.
-The JSON object must have a "module" key and a "data" key. The "module" key must be one of "monthly", "future", "ledger", "daily", or "unknown".
+The JSON object must have a "module" key and a "data" key. The "module" key must be one of "monthly", "future", "ledger", "daily", "metrics", or "unknown".
 The "data" object structure depends on the module:
 1. If module is "monthly": {"text": (string), "tags": (array of strings), "priority": (number, 1-3)}
 2. If module is "future": {"text": (string), "reminder": (string, "YYYY-MM-DDTHH:mm")}
 3. If module is "ledger": {"date": (string, "YYYY-MM-DD"), "item": (string), "amount": (number), "payment": (string, optional)}
 4. If module is "daily": {"text": (string), "cycle": (string, 'daily'/'once'/'mon'...'sun')}
+5. If module is "metrics": {"date": (string, "YYYY-MM-DD"), "name": (string, exact metric name from provided list), "value": (number)}
 Today is ${getTodayString()}. The current year is ${new Date().getFullYear()}.
-ALWAYS return only the raw JSON.
-`,
 
-     // --- 1. Key和模型选择的管理 ---
+The user has the following metrics defined. You MUST match the "name" exactly to one of these:
+${metricsList}
+
+ALWAYS return only the raw JSON.
+`;
+    },
+
+    // --- 1. Key和模型选择的管理 ---
     // 【MODIFIED】Added 'deepseek'
     getKeys: () => ({
         openai: localStorage.getItem('openai_api_key'),
@@ -244,90 +260,69 @@ ALWAYS return only the raw JSON.
  */
 function getReportData(reportType) {
     const now = new Date();
-    let startDate, endDate;
+    let startDate, endDate, prevStartDate, prevEndDate, lastYearStartDate, lastYearEndDate;
     let title = "";
     let isCurrentPeriod = false;
 
-    // 1. 根据 reportType 计算日期范围
+    // 1. 根据 reportType 计算所有需要的时间范围
     switch (reportType) {
-        case 'daily_today': { // 使用花括号创建块级作用域
-            startDate = new Date(new Date().setHours(0, 0, 0, 0));
-            endDate = new Date(new Date().setHours(23, 59, 59, 999));
+        case 'daily_today':
+            startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+            prevStartDate = new Date(startDate); prevStartDate.setDate(startDate.getDate() - 1);
+            prevEndDate = new Date(endDate); prevEndDate.setDate(endDate.getDate() - 1);
+            lastYearStartDate = new Date(startDate); lastYearStartDate.setFullYear(startDate.getFullYear() - 1);
+            lastYearEndDate = new Date(endDate); lastYearEndDate.setFullYear(endDate.getFullYear() - 1);
             title = `${getTodayString()} 工作日报`;
             isCurrentPeriod = true;
             break;
-        }
-
-        case 'weekly_this': { // 使用花括号创建块级作用域
-            const currentDay = now.getDay();
-            const firstDayOfWeek = now.getDate() - currentDay + (currentDay === 0 ? -6 : 1);
-            startDate = new Date(new Date(now).setDate(firstDayOfWeek));
-            startDate.setHours(0, 0, 0, 0);
-            endDate = new Date(startDate);
-            endDate.setDate(startDate.getDate() + 6);
-            endDate.setHours(23, 59, 59, 999);
-            title = "本周工作周报";
-            isCurrentPeriod = true; // 本周也是当前时段
+        case 'weekly_this':
+        case 'weekly_last':
+            const dayOfWeek = now.getDay() === 0 ? 6 : now.getDay() - 1; // 0=Mon, 6=Sun
+            const offset = reportType === 'weekly_last' ? 7 : 0;
+            startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dayOfWeek - offset);
+            endDate = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + 6, 23, 59, 59, 999);
+            prevStartDate = new Date(startDate); prevStartDate.setDate(startDate.getDate() - 7);
+            prevEndDate = new Date(endDate); prevEndDate.setDate(endDate.getDate() - 7);
+            lastYearStartDate = new Date(startDate); lastYearStartDate.setFullYear(startDate.getFullYear() - 1);
+            lastYearEndDate = new Date(endDate); lastYearEndDate.setFullYear(endDate.getFullYear() - 1);
+            title = reportType === 'weekly_this' ? "本周工作周报" : "上周工作周报";
+            isCurrentPeriod = reportType === 'weekly_this';
             break;
-        }
-
-        case 'weekly_last': { // 使用花括号创建块级作用域
-            const currentDay = now.getDay();
-            const firstDayOfLastWeek = now.getDate() - currentDay + (currentDay === 0 ? -6 : 1) - 7;
-            startDate = new Date(new Date(now).setDate(firstDayOfLastWeek));
-            startDate.setHours(0, 0, 0, 0);
-            endDate = new Date(startDate);
-            endDate.setDate(startDate.getDate() + 6);
-            endDate.setHours(23, 59, 59, 999);
-            title = "上周工作周报";
+        case 'monthly_this':
+        case 'monthly_last':
+            const monthOffset = reportType === 'monthly_last' ? 1 : 0;
+            startDate = new Date(now.getFullYear(), now.getMonth() - monthOffset, 1);
+            endDate = new Date(now.getFullYear(), now.getMonth() - monthOffset + 1, 0, 23, 59, 59, 999);
+            prevStartDate = new Date(startDate); prevStartDate.setMonth(startDate.getMonth() - 1);
+            prevEndDate = new Date(prevStartDate.getFullYear(), prevStartDate.getMonth() + 1, 0, 23, 59, 59, 999);
+            lastYearStartDate = new Date(startDate); lastYearStartDate.setFullYear(startDate.getFullYear() - 1);
+            lastYearEndDate = new Date(lastYearStartDate.getFullYear(), lastYearStartDate.getMonth() + 1, 0, 23, 59, 59, 999);
+            title = reportType === 'monthly_this' ? "本月工作月报" : "上月工作月报";
+            isCurrentPeriod = reportType === 'monthly_this';
             break;
-        }
-
-        case 'monthly_this': { // 使用花括号创建块级作用域
-            startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-            endDate = new Date(new Date(now.getFullYear(), now.getMonth() + 1, 0).setHours(23, 59, 59, 999));
-            title = "本月工作月报";
-            isCurrentPeriod = true;
-            break;
-        }
-            
-        case 'monthly_last': { // 使用花括号创建块级作用域
-            startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-            endDate = new Date(new Date(now.getFullYear(), now.getMonth(), 0).setHours(23, 59, 59, 999));
-            title = "上月工作月报";
-            break;
-        }
-
-        case 'yearly_this': { // 使用花括号创建块级作用域
+        case 'yearly_this':
             startDate = new Date(now.getFullYear(), 0, 1);
-            endDate = new Date(new Date(now.getFullYear(), 11, 31).setHours(23, 59, 59, 999));
+            endDate = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+            // 年度报告的环比是上一年，同比无（或可设为更早）
+            prevStartDate = new Date(startDate); prevStartDate.setFullYear(startDate.getFullYear() - 1);
+            prevEndDate = new Date(endDate); prevEndDate.setFullYear(endDate.getFullYear() - 1);
+            lastYearStartDate = null; // 年度同比意义不大，设为null
             title = `${now.getFullYear()}年年度报告`;
             isCurrentPeriod = true;
             break;
-        }
-
-        default:
-            console.error("未知的报告类型:", reportType);
-            return null;
+        default: return null;
     }
 
-    // 2. 收集所有相关数据（不筛选完成状态）
+    // 2. 收集任务和账单数据 (逻辑不变)
     const allRelevantTasks = new Map();
-    const ledgerEntries = [];
-
     const processTask = (task) => {
-        if (!task || !task.id) return; // 确保任务和ID有效
-        const relevantDateStr = task.completionDate || task.creationDate || (isCurrentPeriod ? getTodayString() : null);
-        if (relevantDateStr) {
-            const d = new Date(relevantDateStr);
-            if (d >= startDate && d <= endDate) {
-                if (!allRelevantTasks.has(task.id)) {
-                    allRelevantTasks.set(task.id, task);
-                }
-            }
+        if (!task || !task.id) return;
+        const relevantDate = new Date(task.completionDate || task.creationDate || getTodayString());
+        if (relevantDate >= startDate && relevantDate <= endDate) {
+            if (!allRelevantTasks.has(task.id)) allRelevantTasks.set(task.id, task);
         }
-    };
-    
+    };    
     [
         ...(allTasks.monthly || []),
         ...(Object.values(allTasks.history || {})).flat(),
@@ -356,21 +351,64 @@ function getReportData(reportType) {
 
     const tasks = Array.from(allRelevantTasks.values());
 
-    // 3. 将数据格式化为纯文本，并明确标注状态
+   // 3. 【核心新增】收集、计算和格式化指标数据
+    let metricsFormattedText = `\n## 关键指标回顾:\n`;
+    const metricDefs = allTasks.metrics.definitions || [];
+    
+    if (metricDefs.length > 0) {
+        const allMetricData = Object.values(allTasks.metrics.data || {}).flat();
+
+        const getAverageForPeriod = (metricId, start, end) => {
+            if (!start || !end) return null;
+            const values = allMetricData
+                .filter(d => d.id === metricId && new Date(d.date) >= start && new Date(d.date) <= end)
+                .map(d => d.value);
+            return values.length > 0 ? values.reduce((sum, val) => sum + val, 0) / values.length : null;
+        };
+
+        metricDefs.forEach(metric => {
+            const currentAvg = getAverageForPeriod(metric.id, startDate, endDate);
+            const prevAvg = getAverageForPeriod(metric.id, prevStartDate, prevEndDate);
+            const lastYearAvg = getAverageForPeriod(metric.id, lastYearStartDate, lastYearEndDate);
+
+            if (currentAvg !== null) {
+                let analysis = `- ${metric.name}: 本期均值 ${currentAvg.toFixed(2)}${metric.unit}`;
+                if (prevAvg !== null) {
+                    const diff = ((currentAvg - prevAvg) / prevAvg * 100);
+                    analysis += `, 环比 ${diff >= 0 ? '+' : ''}${diff.toFixed(1)}%`;
+                }
+                if (lastYearAvg !== null) {
+                    const diff = ((currentAvg - lastYearAvg) / lastYearAvg * 100);
+                    analysis += `, 同比 ${diff >= 0 ? '+' : ''}${diff.toFixed(1)}%`;
+                }
+                metricsFormattedText += `${analysis}\n`;
+            }
+        });
+    } else {
+        metricsFormattedText += "- 未设置任何追踪指标。\n";
+    }
+
+    // 4. 组合所有数据
     let formattedText = `## 任务清单:\n`;
     if (tasks.length > 0) {
         tasks.forEach(t => {
             const status = t.completed ? 'completed' : 'uncompleted';
             let taskLine = `- ${t.text} (status: ${status})`;
-            if (t.tags?.length > 0) {
-                taskLine += ` (tags: ${t.tags.join(', ')})`;
-            }
+            if (t.tags?.length > 0) taskLine += ` (tags: ${t.tags.join(', ')})`;
             formattedText += `${taskLine}\n`;
         });
     } else {
         formattedText += "- 本时段无相关任务。\n";
     }
 
+    formattedText += metricsFormattedText; // 将指标回顾部分加入
+
+    if (ledgerEntries.length > 0) {
+        const totalExpense = ledgerEntries.reduce((sum, e) => sum + (e.amount || 0), 0);
+        formattedText += `\n## 财务支出小结:\n- 共 ${ledgerEntries.length} 笔支出，总计 ${allTasks.currencySymbol || '$'}${totalExpense.toFixed(2)}。\n`;
+    }
+
+    return { title, data: formattedText };
 }
 
 /**
@@ -658,6 +696,7 @@ let notificationsEnabled = true;
 let selectedLedgerMonth = 'current';
 let selectedMonthlyDisplayMonth = 'current';
 let currentMonthlyTagFilter = 'all';
+let currentMonthlyStatusFilter = 'all'; // 新增：用于跟踪本月任务的状态筛选
 let currentLedgerFilter = 'all';
 let historyModalFor = null;
 let historyDisplayYear = new Date().getFullYear();
@@ -861,6 +900,14 @@ const dailyQuotes = [
 // (保持你现有的这部分代码不变)
 // ========================================================================
 let statsBtn, statsModal, statsModalCloseBtn, faqBtn, faqModal, faqModalCloseBtn, faqListDiv, mainSearchInput, dailyTitleDate, themeToggleBtn, feedbackBtn, donateBtn, dailyTaskList, monthlyTaskList, futureTaskList, ledgerList, monthlyHeaderTitle, sortMonthlyByPriorityBtn, ledgerHeaderTitle, monthlyInputArea, ledgerInputArea, newDailyTaskInput, addDailyTaskBtn, newMonthlyTaskInput, newMonthlyTagsInput, addMonthlyTaskBtn, newFutureTaskInput, futureTaskDateTimeInput, addFutureTaskBtn, ledgerDateInput, ledgerItemInput, ledgerAmountInput, ledgerPaymentInput, ledgerDetailsInput, addLedgerBtn, monthlyTagsContainer, ledgerTagsContainer, ledgerSummaryContainer, monthlyHistoryBtn, ledgerHistoryBtn, historyModal, historyModalCloseBtn, historyModalTitle, historyPrevYearBtn, historyNextYearBtn, historyCurrentYearSpan, historyMonthsGrid, donateModal, modalCloseBtn, featuresBtn, featuresModal, featuresModalCloseBtn, featuresListUl, exportMonthlyHistoryBtn, importMonthlyBtn, downloadMonthlyTemplateBtn, importMonthlyFileInput, exportLedgerHistoryBtn, importLedgerBtn, downloadLedgerTemplateBtn, importLedgerFileInput, toggleNotificationsBtn, customPromptModal, customPromptTitleEl, customPromptMessageEl, customPromptInputContainer, customPromptConfirmBtn, customPromptCancelBtn, customPromptCloseBtn, setBudgetBtn, annualReportBtn, annualReportModal, annualReportCloseBtn, annualReportTitle, annualReportPrevYearBtn, annualReportNextYearBtn, annualReportCurrentYearSpan, annualReportSummaryDiv, annualReportDetailsDiv, currencyPickerBtn, syncDriveBtn, syncStatusSpan, bottomNav, allSections, isHistoryModalOpen;
+// --- Add these new variables at the end of the global variables section ---
+// --- Add these new variables at the end of the global variables section ---
+let viewSwitcher, showTasksViewBtn, showMetricsViewBtn, dailyTasksView, dailyMetricsView,
+    metricsControls, metricsSettingsBtn, metricsProjectPills, metricsChartContainer,
+    chartTimeDimension, refreshChartBtn, metricsChartCanvas, metricsDataTableContainer,
+    metricsInitialSetupPrompt, goToMetricsSettingsBtn, selectedMetricsDisplayMonth = 'current',
+    activeMetricProjectId = null, // 【核心修复】添加这个变量来追踪当前选中的项目
+    metricsChartInstance = null;  // 【核心修复】同时添加这个变量来存储图表实例
 
 // ========================================================================
 // 4. 核心功能函数定义
@@ -1070,7 +1117,7 @@ async function loadTasks(callback) {
         data = await db.get('allTasks');
     } catch (error) {
         console.error("[PWA] Error loading tasks from DB:", error);
-        allTasks = { daily: [], monthly: [], future: [], ledger: [], history: {}, ledgerHistory: {}, budgets: {}, currencySymbol: '$', lastUpdatedLocal: 0, lastDailyResetDate: '1970-01-01' };
+allTasks = { daily: [], monthly: [], future: [], ledger: [], history: {}, ledgerHistory: {}, budgets: {}, currencySymbol: '$', lastUpdatedLocal: 0, lastDailyResetDate: '1970-01-01', metrics: { projects: [], definitions: [], data: {} } };
         await saveTasks();
         if (callback) callback();
         return;
@@ -1479,9 +1526,8 @@ function renderAllLists() {
           ) 
         : baseLedgerData;
 
-    renderDailyTasks(dailyData);
+renderDailySection();
     renderMonthlyTasks(monthlyData, selectedMonthlyDisplayMonth !== 'current');
-    renderMonthlyTags(monthlyData);
     renderFutureTasks(futureData);
     renderLedger(ledgerData, selectedLedgerMonth !== 'current');
     renderLedgerTags(ledgerData);
@@ -1779,32 +1825,377 @@ function renderDailyTasks(tasksToRender) {
     );
 renderProgressTracker('daily', tasksToShow);
 }
+
+// ========================================================================
+// START: METRICS FEATURE FUNCTIONS
+// ========================================================================
+
+function renderDailySection() {
+    // This function now acts as a controller for the "Daily" section.
+    // It decides whether to show the Tasks view or the Metrics view.
+    const isMetricsView = showMetricsViewBtn && showMetricsViewBtn.classList.contains('active');
+
+    if (dailyTasksView) dailyTasksView.classList.toggle('hidden', isMetricsView);
+    if (dailyMetricsView) dailyMetricsView.classList.toggle('hidden', !isMetricsView);
+    if (metricsControls) metricsControls.style.display = isMetricsView ? 'flex' : 'none';
+
+    if (isMetricsView) {
+        renderMetricsView();
+    } else {
+        // We still need to render daily tasks when in the tasks view.
+        // The filtering logic is handled inside renderDailyTasks.
+        renderDailyTasks(allTasks.daily || []);
+    }
+}
+
+function renderMetricsView() {
+    const { projects, definitions } = allTasks.metrics || { projects: [], definitions: [] };
+
+    if (projects.length === 0 || definitions.length === 0) {
+        if(metricsInitialSetupPrompt) metricsInitialSetupPrompt.classList.remove('hidden');
+        if(metricsProjectPills) metricsProjectPills.classList.add('hidden');
+        if(metricsChartContainer) metricsChartContainer.classList.add('hidden');
+        if(metricsDataTableContainer) metricsDataTableContainer.classList.add('hidden');
+        return;
+    }
+
+    if(metricsInitialSetupPrompt) metricsInitialSetupPrompt.classList.add('hidden');
+    if(metricsProjectPills) metricsProjectPills.classList.remove('hidden');
+    // Chart and Table visibility is handled by their respective render functions
+
+    if (!activeMetricProjectId && projects.length > 0) {
+        activeMetricProjectId = projects[0].id;
+    }
+
+    requestAnimationFrame(() => {
+        populateHistoryMonthsSelector();
+        renderMetricProjectPills();
+        renderMetricsDataTable();
+        renderMetricsChart();
+    });
+}
+
+function renderMetricProjectPills() {
+    if (!metricsProjectPills) return;
+    metricsProjectPills.innerHTML = '';
+    (allTasks.metrics.projects || []).forEach(proj => {
+        const btn = document.createElement('button');
+        btn.className = 'tag-button';
+        btn.textContent = proj.name;
+        btn.dataset.projectId = proj.id;
+        if (proj.id === activeMetricProjectId) {
+            btn.classList.add('active');
+        }
+        btn.addEventListener('click', () => {
+            activeMetricProjectId = proj.id;
+            renderMetricsView();
+        });
+        metricsProjectPills.appendChild(btn);
+    });
+}
+
+function renderMetricsDataTable() {
+    if (!metricsDataTableContainer) return;
+
+    const metricsForProject = (allTasks.metrics.definitions || []).filter(def => def.projectId === activeMetricProjectId);
+    if (metricsForProject.length === 0) {
+        metricsDataTableContainer.innerHTML = '<p style="text-align:center; color: var(--light-text-color);">此项目下无指标，请在设置中添加。</p>';
+        return;
+    }
+
+    const { labels } = prepareChartData(metricsForProject); // Use chart data prep to get consistent labels
+    
+    let tableHTML = '<table class="metrics-table"><thead><tr><th class="metric-name-cell">指标</th>';
+    labels.forEach(label => {
+        const dateParts = label.split('-');
+        // Display MM-DD for daily/monthly views, or the full label for others
+        const headerLabel = dateParts.length === 3 ? `${dateParts[1]}-${dateParts[2]}` : label;
+        tableHTML += `<th>${headerLabel}</th>`;
+    });
+    tableHTML += '</tr></thead><tbody>';
+
+    metricsForProject.forEach(metric => {
+        tableHTML += `<tr><td class="metric-name-cell">${metric.name}<span class="unit">(${metric.unit})</span></td>`;
+        labels.forEach(dateStr => {
+            const dataEntry = (allTasks.metrics.data[metric.id] || []).find(d => d.date === dateStr);
+            const value = dataEntry ? dataEntry.value : '';
+            tableHTML += `<td><input type="number" class="metric-value-input" data-metric-id="${metric.id}" data-date="${dateStr}" value="${value}" step="any"></td>`;
+        });
+        tableHTML += '</tr>';
+    });
+
+    tableHTML += '</tbody></table>';
+    metricsDataTableContainer.innerHTML = tableHTML;
+}
+
+function renderMetricsChart() {
+    if (metricsChartInstance) {
+        metricsChartInstance.destroy();
+        metricsChartInstance = null;
+    }
+    
+    const metricsForProject = (allTasks.metrics.definitions || []).filter(def => def.projectId === activeMetricProjectId);
+    if (metricsForProject.length === 0) {
+        if(metricsChartContainer) metricsChartContainer.classList.add('hidden');
+        return;
+    }
+    if(metricsChartContainer) metricsChartContainer.classList.remove('hidden');
+
+    const { labels, datasetsData } = prepareChartData(metricsForProject);
+    const chartColors = ['#3B82F6', '#14B8A6', '#F59E0B', '#8B5CF6', '#EF4444', '#6366F1'];
+
+    const datasets = metricsForProject.map((metric, index) => {
+        const color = chartColors[index % chartColors.length];
+        return {
+            label: `${metric.name} (${metric.unit})`,
+            data: datasetsData[metric.id],
+            borderColor: color,
+            backgroundColor: color + '33',
+            fill: false,
+            tension: 0.1,
+            spanGaps: true,
+        };
+    });
+
+    if (!metricsChartCanvas) return;
+    const ctx = metricsChartCanvas.getContext('2d');
+    if (!ctx) return;
+
+    metricsChartInstance = new Chart(ctx, {
+        type: 'line',
+        data: { labels: labels, datasets: datasets },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: { grid: { color: 'rgba(128, 128, 128, 0.1)' }, ticks: { color: 'var(--light-text-color)' } },
+                y: { grid: { color: 'rgba(128, 128, 128, 0.1)' }, ticks: { color: 'var(--light-text-color)' }, beginAtZero: false }
+            },
+            plugins: { legend: { position: 'top', labels: { color: 'var(--text-color)' } } }
+        }
+    });
+}
+
+function prepareChartData(metrics) {
+    const timeDimension = chartTimeDimension ? chartTimeDimension.value : 'currentMonth';
+    const labels = [];
+    const datasetsData = {};
+    metrics.forEach(m => { datasetsData[m.id] = []; });
+
+    let startDate, endDate;
+    
+    if (timeDimension.match(/^\d{4}-\d{2}$/)) {
+        const parts = timeDimension.split('-');
+        const year = parseInt(parts[0], 10);
+        const month = parseInt(parts[1], 10) - 1;
+        startDate = new Date(year, month, 1);
+        endDate = new Date(year, month + 1, 0);
+        for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+            // 【核心修复】使用新的格式化函数
+            labels.push(formatDateToYYYYMMDD(new Date(d)));
+        }
+    } else if (timeDimension === 'last30') {
+        endDate = new Date();
+        for (let i = 29; i >= 0; i--) {
+            const d = new Date();
+            d.setDate(endDate.getDate() - i);
+            // 【核心修复】使用新的格式化函数
+            labels.push(formatDateToYYYYMMDD(d));
+        }
+    } else if (timeDimension === 'currentYear') {
+        const year = new Date().getFullYear();
+        for (let i = 0; i < 12; i++) { labels.push(`${year}-${String(i + 1).padStart(2, '0')}`); }
+        metrics.forEach(metric => {
+            const metricData = allTasks.metrics.data[metric.id] || [];
+            labels.forEach(monthLabel => {
+                const values = metricData.filter(d => d.date.startsWith(monthLabel)).map(d => d.value);
+                const avg = values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : null;
+                datasetsData[metric.id].push(avg !== null ? parseFloat(avg.toFixed(2)) : null);
+            });
+        });
+        return { labels, datasetsData };
+    } else { // currentMonth
+        const today = new Date();
+        const year = today.getFullYear();
+        const month = today.getMonth();
+        startDate = new Date(year, month, 1);
+        endDate = new Date(year, month + 1, 0);
+        for (let d = new Date(startDate); d <= endDate; d.setDate(d.getDate() + 1)) {
+            // 【核心修复】使用新的格式化函数
+            labels.push(formatDateToYYYYMMDD(new Date(d)));
+        }
+    }
+
+    labels.forEach(dateStr => {
+        metrics.forEach(metric => {
+            const entry = (allTasks.metrics.data[metric.id] || []).find(d => d.date === dateStr);
+            datasetsData[metric.id].push(entry ? entry.value : null);
+        });
+    });
+
+    return { labels, datasetsData };
+}
+function saveMetricValue(metricId, date, value) {
+    if (!allTasks.metrics.data[metricId]) allTasks.metrics.data[metricId] = [];
+    const dataIndex = allTasks.metrics.data[metricId].findIndex(d => d.date === date);
+    const numericValue = parseFloat(value);
+
+    if (isNaN(numericValue) || value.trim() === '') {
+        if (dataIndex > -1) allTasks.metrics.data[metricId].splice(dataIndex, 1);
+    } else {
+        if (dataIndex > -1) {
+            allTasks.metrics.data[metricId][dataIndex].value = numericValue;
+        } else {
+            allTasks.metrics.data[metricId].push({ date, value: numericValue });
+        }
+    }
+    saveTasks();
+    // Re-render chart after a short delay to allow data saving
+    setTimeout(renderMetricsChart, 50);
+}
+
+function openMetricsSettingsModal() {
+    const onModalRender = () => {
+        const contentContainer = document.querySelector('#custom-prompt-modal .custom-prompt-input-area');
+        const refreshContent = () => {
+            let html = '<div class="metrics-settings-content">';
+            (allTasks.metrics.projects || []).forEach(proj => {
+                html += `<div class="metric-project-group">
+                    <div class="metric-project-header">
+                        <h4>${proj.name}</h4>
+                        <button class="action-btn delete-btn" data-project-id="${proj.id}" title="删除此项目">×</button>
+                    </div><ul class="metric-list">`;
+                (allTasks.metrics.definitions || []).filter(def => def.projectId === proj.id).forEach(metric => {
+                    html += `<li class="metric-list-item"><span>${metric.name} (${metric.unit})</span><button class="action-btn delete-btn" data-metric-id="${metric.id}" title="删除此指标">×</button></li>`;
+                });
+                html += `</ul><div class="input-area" style="margin-top: 15px;">
+                        <input type="text" class="new-metric-name-input" placeholder="新指标名称..." data-project-id="${proj.id}">
+                        <input type="text" class="new-metric-unit-input" placeholder="单位(如:kg)" data-project-id="${proj.id}">
+                        <button class="add-metric-btn" data-project-id="${proj.id}">+</button>
+                    </div></div>`;
+            });
+            html += `</div><div class="input-area" style="margin-top: 20px; border-top: 1px solid var(--card-border-color); padding-top: 20px;">
+                 <input type="text" id="new-metric-project-input" placeholder="添加新项目..."><button id="add-metric-project-btn">+</button></div>`;
+            contentContainer.innerHTML = html;
+        };
+
+        const handleInternalClicks = (e) => {
+            const button = e.target.closest('button'); if (!button) return; e.stopPropagation();
+            if (button.classList.contains('add-metric-btn')) {
+                const projectId = button.dataset.projectId;
+                const nameInput = contentContainer.querySelector(`.new-metric-name-input[data-project-id="${projectId}"]`);
+                const unitInput = contentContainer.querySelector(`.new-metric-unit-input[data-project-id="${projectId}"]`);
+                if (nameInput && unitInput && nameInput.value.trim() && unitInput.value.trim()) {
+                    allTasks.metrics.definitions.push({ id: `m_${Date.now()}`, projectId, name: nameInput.value.trim(), unit: unitInput.value.trim() });
+                    saveTasks().then(refreshContent);
+                }
+            } else if (button.classList.contains('delete-btn')) {
+                const metricId = button.dataset.metricId; const projectId = button.dataset.projectId;
+                if (metricId) {
+                    allTasks.metrics.definitions = allTasks.metrics.definitions.filter(d => d.id !== metricId);
+                    delete allTasks.metrics.data[metricId];
+                } else if (projectId) {
+                    allTasks.metrics.projects = allTasks.metrics.projects.filter(p => p.id !== projectId);
+                    allTasks.metrics.definitions = allTasks.metrics.definitions.filter(d => d.projectId !== projectId);
+                }
+                saveTasks().then(refreshContent);
+            } else if (button.id === 'add-metric-project-btn') {
+                const input = document.getElementById('new-metric-project-input');
+                if (input && input.value.trim()) {
+                    allTasks.metrics.projects.push({ id: `proj_${Date.now()}`, name: input.value.trim() });
+                    saveTasks().then(refreshContent);
+                }
+            }
+        };
+
+        refreshContent();
+        contentContainer.addEventListener('click', handleInternalClicks);
+        const onFinish = () => {
+            contentContainer.removeEventListener('click', handleInternalClicks);
+            renderMetricsView();
+            closeCustomPrompt();
+        };
+        document.getElementById('custom-prompt-cancel-btn').onclick = onFinish;
+        document.getElementById('custom-prompt-close-btn').onclick = onFinish;
+    };
+
+    openCustomPrompt({
+        title: '项目与指标设置', htmlContent: '<div class="custom-prompt-input-area"></div>',
+        hideConfirmButton: true, cancelText: '完成', onRender: onModalRender
+    });
+}
+
+function populateHistoryMonthsSelector() {
+    if (!chartTimeDimension) return;
+    chartTimeDimension.querySelectorAll('option[data-history-month], option[disabled]').forEach(opt => opt.remove());
+    const monthsWithData = new Set();
+    if (allTasks.metrics && allTasks.metrics.data) {
+        Object.values(allTasks.metrics.data).flat().forEach(entry => monthsWithData.add(entry.date.substring(0, 7)));
+    }
+    const sortedMonths = Array.from(monthsWithData).sort().reverse();
+    if (sortedMonths.length > 0) {
+        const separator = document.createElement('option');
+        separator.disabled = true; separator.textContent = '──────────';
+        chartTimeDimension.appendChild(separator);
+        sortedMonths.forEach(monthKey => {
+            const option = document.createElement('option');
+            option.value = monthKey; option.textContent = `${monthKey} (历史)`;
+            option.dataset.historyMonth = true;
+            chartTimeDimension.appendChild(option);
+        });
+    }
+    const targetValue = selectedMetricsDisplayMonth === 'current' ? 'currentMonth' : selectedMetricsDisplayMonth;
+    if (chartTimeDimension.querySelector(`option[value="${targetValue}"]`)) {
+        chartTimeDimension.value = targetValue;
+    } else {
+        chartTimeDimension.value = 'currentMonth';
+        selectedMetricsDisplayMonth = 'current';
+    }
+}
 // --- END OF REPLACEMENT ---
+// 【请用此版本完整替换旧的 renderMonthlyTasks 函数】
 function renderMonthlyTasks(dataToRender, isHistoryView) {
     if (!monthlyTaskList) return;
 
-    // --- 1. 更新头部UI ---
+    // --- 1. 更新头部和UI控件状态 ---
+    const monthlyTaskFilter = document.getElementById('monthly-task-filter'); // 确保每次都获取到
     if (isHistoryView) {
         monthlyHeaderTitle.innerHTML = `本月待办 <span class="header-date">(${selectedMonthlyDisplayMonth})</span>`;
         if (monthlyHistoryBtn) monthlyHistoryBtn.innerHTML = `<img src="images/icon-back.svg" alt="Back">`;
         if (monthlyHistoryBtn) monthlyHistoryBtn.title = '返回当月视图';
+        if (monthlyTaskFilter) monthlyTaskFilter.style.display = 'none'; // 历史视图中隐藏筛选器
     } else {
         const now = new Date();
         monthlyHeaderTitle.innerHTML = `本月待办 <span class="header-date">(${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')})</span>`;
         if (monthlyHistoryBtn) monthlyHistoryBtn.innerHTML = `<img src="images/icon-history.svg" alt="History">`;
         if (monthlyHistoryBtn) monthlyHistoryBtn.title = '查看历史记录';
+        if (monthlyTaskFilter) monthlyTaskFilter.style.display = 'flex'; // 当前视图中显示筛选器
     }
     if (monthlyInputArea) monthlyInputArea.style.display = isHistoryView ? 'none' : 'grid';
 
-    // --- 2. 清空并准备渲染 ---
+    // --- 2. 【核心】应用状态筛选 ---
+    let statusFilteredTasks = dataToRender;
+    if (!isHistoryView) { // 状态筛选仅在当前视图生效
+        if (currentMonthlyStatusFilter === 'completed') {
+            statusFilteredTasks = dataToRender.filter(t => t.completed);
+        } else if (currentMonthlyStatusFilter === 'in-progress') {
+            statusFilteredTasks = dataToRender.filter(t => !t.completed);
+        }
+    }
+
+    // --- 3. 【核心】基于筛选结果，动态渲染标签 ---
+    renderMonthlyTags(statusFilteredTasks);
+
+    // --- 4. 应用标签筛选 ---
+    const tasksToDisplay = statusFilteredTasks.filter(task => 
+        currentMonthlyTagFilter === 'all' || (task.tags && task.tags.includes(currentMonthlyTagFilter))
+    );
+    
+    // --- 5. 渲染任务列表 ---
     monthlyTaskList.innerHTML = '';
     const fragment = document.createDocumentFragment();
     
-    const tasksToDisplay = Array.isArray(dataToRender) ? dataToRender : [];
-    const filteredMonthlyTasks = tasksToDisplay.filter(task => currentMonthlyTagFilter === 'all' || (task.tags && task.tags.includes(currentMonthlyTagFilter)));
-    
-    // --- 3. 遍历任务并创建DOM元素 ---
-    filteredMonthlyTasks.forEach((task) => {
+    tasksToDisplay.forEach((task) => {
         const li = document.createElement('li');
         li.className = 'li-monthly';
         if (task.completed) li.classList.add('completed');
@@ -1818,12 +2209,8 @@ function renderMonthlyTasks(dataToRender, isHistoryView) {
             updateMonthlyTaskProgress(allTasks.monthly[originalIndex]);
         }
         
-        // --- 添加点击事件以展开/折叠 ---
         li.addEventListener('click', (e) => {
-            // 【关键修改】忽略对拖拽手柄的点击
-            if (e.target.closest('a, button, input, .checkbox, .drag-handle')) {
-                return;
-            }
+            if (e.target.closest('a, button, input, .checkbox, .drag-handle')) return;
             const isExpanded = li.classList.toggle('is-expanded');
             if (isExpanded) {
                 monthlyTaskList.querySelectorAll('li.is-expanded').forEach(item => {
@@ -1837,56 +2224,25 @@ function renderMonthlyTasks(dataToRender, isHistoryView) {
         progressBar.style.width = `${task.progress || 0}%`;
         li.appendChild(progressBar);
         
-        // --- 保留拖拽手柄的创建 ---
         if (!isHistoryView) {
             li.appendChild(createDragHandle());
         }
         
-        // --- 正确地附加由 createTaskContent 创建的完整内容 ---
-        // createTaskContent 内部已经包含了隐藏的详情面板和操作按钮
         li.appendChild(createTaskContent(task, originalIndex, 'monthly', isHistoryView));
         
         fragment.appendChild(li);
     });
-
-    // --- 4. 将所有创建的元素一次性添加到DOM ---
     monthlyTaskList.appendChild(fragment);
 
-    // --- 5. 全局事件监听器（无需修改） ---
-    if (!document.body.dataset.sortModeExitListenerAttached) {
-        document.body.addEventListener('click', (e) => {
-            if (monthlyTaskList && !e.target.closest('.task-list.sort-mode-active')) {
-                exitSortMode();
-            }
-        });
-        document.body.dataset.sortModeExitListenerAttached = 'true';
-    }
-
-    // --- 6. 【新增】处理祝贺信息 ---
-    // 注意：只在非历史视图下显示祝贺信息
+    // --- 6. 更新进度条 ---
+    // 进度条应反映所有任务的情况，而不是筛选后的情况，所以使用最原始的 dataToRender
     if (!isHistoryView) {
-        const currentMonthlyData = getMonthlyDataForDisplay(); // 获取当前月份的完整数据
-        handleCompletionCelebration(
-            'monthly',
-            currentMonthlyData, // 检查的是当前月份的完整任务列表
-            monthlyTaskList,
-            '太棒了，您完成了本月的所有任务！'
-        );
+        renderProgressTracker('monthly', dataToRender);
     } else {
-        // 如果是历史视图，确保移除可能存在的祝贺信息
-        handleCompletionCelebration('monthly', [], monthlyTaskList, '');
+        const tracker = document.getElementById('monthly-progress-tracker');
+        if (tracker) tracker.style.display = 'none';
     }
-if (!isHistoryView) {
-    // We pass the complete, unfiltered list of tasks for the current month
-    // to accurately calculate the overall progress.
-    renderProgressTracker('monthly', getMonthlyDataForDisplay());
-} else {
-    // For history views, ensure any tracker is hidden.
-    const tracker = document.getElementById('monthly-progress-tracker');
-    if (tracker) tracker.style.display = 'none';
 }
-}
-
 // 在 app.js 中，用这个版本替换掉你原来的 renderFutureTasks 函数
 function renderFutureTasks(tasksToRender) {
     if (!futureTaskList) return;
@@ -1921,7 +2277,24 @@ function renderFutureTasks(tasksToRender) {
         titleGroup.appendChild(taskText);
         
         // ======================= 核心修改在此 =======================
-        if (task.reminderTime && task.reminderTime > Date.now()) {
+      if (monthlyTaskFilter) {
+        monthlyTaskFilter.addEventListener('click', (e) => {
+            if (e.target.tagName === 'BUTTON') {
+                // 更新状态变量
+                currentMonthlyStatusFilter = e.target.dataset.filter;
+                
+                // 更新UI，切换active类
+                monthlyTaskFilter.querySelector('.active').classList.remove('active');
+                e.target.classList.add('active');
+                
+                // 触发列表重绘以应用筛选
+                renderAllLists();
+            }
+        });
+    }
+
+
+      if (task.reminderTime && task.reminderTime > Date.now()) {
             const reminderSpan = document.createElement('span');
             reminderSpan.className = 'reminder-info';
             
@@ -2991,7 +3364,25 @@ function renderLedgerSummary(dataToRender) {
         ledgerSummaryBreakdown.appendChild(itemDiv);
     });
 }
-function getTodayString() { const today = new Date(); const year = today.getFullYear(); const month = String(today.getMonth() + 1).padStart(2, '0'); const day = String(today.getDate()).padStart(2, '0'); return `${year}-${month}-${day}`; }
+/**
+ * 获取今天的日期字符串 (YYYY-MM-DD)
+ * @returns {string}
+ */
+function getTodayString() {
+    const today = new Date();
+    const year = today.getFullYear();
+    const month = String(today.getMonth() + 1).padStart(2, '0');
+    const day = String(today.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
+
+// 【核心修复】添加这个新的、不受时区影响的日期格式化函数
+function formatDateToYYYYMMDD(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+}
 // --- START OF REPLACEMENT ---
 function cleanupDailyTasks() {
     const todayString = getTodayString();
@@ -3121,12 +3512,23 @@ function updateHistoryModalTitle() {
     if (!historyModalTitle) return;
     if (historyModalFor === 'monthly') { historyModalTitle.textContent = '选择“本月待办”历史月份'; } 
     else if (historyModalFor === 'ledger') { historyModalTitle.textContent = '选择“记账本”历史月份'; } 
+    else if (historyModalFor === 'metrics') { historyModalTitle.textContent = '选择“指标”历史月份'; }
 }
 function renderHistoryCalendar() {
     if (!historyCurrentYearSpan || !historyMonthsGrid) return;
     historyCurrentYearSpan.textContent = historyDisplayYear;
     historyMonthsGrid.innerHTML = '';
-    const historySource = historyModalFor === 'monthly' ? allTasks.history : allTasks.ledgerHistory;
+    const historySource = historyModalFor === 'monthly' 
+    ? allTasks.history 
+    : historyModalFor === 'ledger' 
+        ? allTasks.ledgerHistory
+        : (allTasks.metrics && allTasks.metrics.data ? Object.fromEntries(
+            Object.entries(Object.values(allTasks.metrics.data).flat().reduce((acc, {date}) => {
+                const month = date.substring(0, 7);
+                acc[month] = true;
+                return acc;
+            }, {})).map(([key]) => [key, [1]]) // Dummy data to mark as "has-history"
+          ) : {});
 
     for (let i = 1; i <= 12; i++) {
         const monthBtn = document.createElement('button');
@@ -3153,6 +3555,11 @@ function selectHistoryMonth(monthKey) {
         selectedLedgerMonth = monthKey; 
         currentLedgerFilter = 'all'; 
     }
+else if (historyModalFor === 'metrics') {
+    selectedMetricsDisplayMonth = monthKey;
+    if(chartTimeDimension) chartTimeDimension.value = monthKey;
+    // The renderAllLists call below will trigger the metrics view update
+}
     closeHistoryModal();
     renderAllLists();
 }
@@ -3719,137 +4126,153 @@ return tasksWereMoved;
  */
 function getReportData(reportType) {
     const now = new Date();
-    let startDate, endDate;
+    let startDate, endDate, prevStartDate, prevEndDate, comparisonStartDate, comparisonEndDate;
     let title = "";
     let isCurrentPeriod = false;
 
-    // 1. 根据 reportType 计算日期范围
+    // 1. 根据 reportType 计算所有需要的时间范围 (此部分逻辑不变，但包含在内以保证完整性)
     switch (reportType) {
-        case 'daily_today': { // 使用花括号创建块级作用域
-            startDate = new Date(new Date().setHours(0, 0, 0, 0));
-            endDate = new Date(new Date().setHours(23, 59, 59, 999));
+        case 'daily_today':
+            startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+            prevStartDate = new Date(startDate); prevStartDate.setDate(startDate.getDate() - 1);
+            prevEndDate = new Date(endDate); prevEndDate.setDate(endDate.getDate() - 1);
+            comparisonStartDate = new Date(startDate); comparisonStartDate.setDate(startDate.getDate() - 7);
+            comparisonEndDate = new Date(endDate); comparisonEndDate.setDate(endDate.getDate() - 7);
             title = `${getTodayString()} 工作日报`;
             isCurrentPeriod = true;
             break;
-        }
-
-        case 'weekly_this': { // 使用花括号创建块级作用域
-            const currentDay = now.getDay();
-            const firstDayOfWeek = now.getDate() - currentDay + (currentDay === 0 ? -6 : 1);
-            startDate = new Date(new Date(now).setDate(firstDayOfWeek));
-            startDate.setHours(0, 0, 0, 0);
-            endDate = new Date(startDate);
-            endDate.setDate(startDate.getDate() + 6);
-            endDate.setHours(23, 59, 59, 999);
-            title = "本周工作周报";
-            isCurrentPeriod = true; // 本周也是当前时段
+        case 'weekly_this':
+        case 'weekly_last':
+            const dayOfWeek = now.getDay() === 0 ? 6 : now.getDay() - 1;
+            const offset = reportType === 'weekly_last' ? 7 : 0;
+            startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dayOfWeek - offset);
+            endDate = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate() + 6, 23, 59, 59, 999);
+            prevStartDate = new Date(startDate); prevStartDate.setDate(startDate.getDate() - 7);
+            prevEndDate = new Date(endDate); prevEndDate.setDate(endDate.getDate() - 7);
+            comparisonStartDate = new Date(startDate); comparisonStartDate.setFullYear(startDate.getFullYear() - 1);
+            comparisonEndDate = new Date(endDate); comparisonEndDate.setFullYear(endDate.getFullYear() - 1);
+            title = reportType === 'weekly_this' ? "本周工作周报" : "上周工作周报";
+            isCurrentPeriod = reportType === 'weekly_this';
             break;
-        }
-
-        case 'weekly_last': { // 使用花括号创建块级作用域
-            const currentDay = now.getDay();
-            const firstDayOfLastWeek = now.getDate() - currentDay + (currentDay === 0 ? -6 : 1) - 7;
-            startDate = new Date(new Date(now).setDate(firstDayOfLastWeek));
-            startDate.setHours(0, 0, 0, 0);
-            endDate = new Date(startDate);
-            endDate.setDate(startDate.getDate() + 6);
-            endDate.setHours(23, 59, 59, 999);
-            title = "上周工作周报";
+        case 'monthly_this':
+        case 'monthly_last':
+            const monthOffset = reportType === 'monthly_last' ? 1 : 0;
+            startDate = new Date(now.getFullYear(), now.getMonth() - monthOffset, 1);
+            endDate = new Date(now.getFullYear(), now.getMonth() - monthOffset + 1, 0, 23, 59, 59, 999);
+            prevStartDate = new Date(startDate); prevStartDate.setMonth(startDate.getMonth() - 1);
+            prevEndDate = new Date(prevStartDate.getFullYear(), prevStartDate.getMonth() + 1, 0, 23, 59, 59, 999);
+            comparisonStartDate = new Date(startDate); comparisonStartDate.setFullYear(startDate.getFullYear() - 1);
+            comparisonEndDate = new Date(comparisonStartDate.getFullYear(), comparisonStartDate.getMonth() + 1, 0, 23, 59, 59, 999);
+            title = reportType === 'monthly_this' ? "本月工作月报" : "上月工作月报";
+            isCurrentPeriod = reportType === 'monthly_this';
             break;
-        }
-
-        case 'monthly_this': { // 使用花括号创建块级作用域
-            startDate = new Date(now.getFullYear(), now.getMonth(), 1);
-            endDate = new Date(new Date(now.getFullYear(), now.getMonth() + 1, 0).setHours(23, 59, 59, 999));
-            title = "本月工作月报";
-            isCurrentPeriod = true;
-            break;
-        }
-            
-        case 'monthly_last': { // 使用花括号创建块级作用域
-            startDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-            endDate = new Date(new Date(now.getFullYear(), now.getMonth(), 0).setHours(23, 59, 59, 999));
-            title = "上月工作月报";
-            break;
-        }
-
-        case 'yearly_this': { // 使用花括号创建块级作用域
+        case 'yearly_this':
             startDate = new Date(now.getFullYear(), 0, 1);
-            endDate = new Date(new Date(now.getFullYear(), 11, 31).setHours(23, 59, 59, 999));
+            endDate = new Date(now.getFullYear(), 11, 31, 23, 59, 59, 999);
+            prevStartDate = new Date(startDate); prevStartDate.setFullYear(startDate.getFullYear() - 1);
+            prevEndDate = new Date(endDate); prevEndDate.setFullYear(endDate.getFullYear() - 1);
+            comparisonStartDate = null;
             title = `${now.getFullYear()}年年度报告`;
             isCurrentPeriod = true;
             break;
-        }
-
-        default:
-            console.error("未知的报告类型:", reportType);
-            return null;
+        default: return null;
     }
 
-    // 2. 收集所有相关数据（不筛选完成状态）
+    // 2. 收集任务和账单数据 (逻辑不变)
     const allRelevantTasks = new Map();
-    const ledgerEntries = [];
-
     const processTask = (task) => {
-        if (!task || !task.id) return; // 确保任务和ID有效
-        const relevantDateStr = task.completionDate || task.creationDate || (isCurrentPeriod ? getTodayString() : null);
-        if (relevantDateStr) {
-            const d = new Date(relevantDateStr);
-            if (d >= startDate && d <= endDate) {
-                if (!allRelevantTasks.has(task.id)) {
-                    allRelevantTasks.set(task.id, task);
-                }
-            }
+        if (!task || !task.id) return;
+        const relevantDate = new Date((task.completionDate || task.creationDate || getTodayString()) + 'T00:00:00');
+        if (relevantDate >= startDate && relevantDate <= endDate) {
+            if (!allRelevantTasks.has(task.id)) allRelevantTasks.set(task.id, task);
         }
     };
-    
-    [
-        ...(allTasks.monthly || []),
-        ...(Object.values(allTasks.history || {})).flat(),
-        ...(allTasks.daily || [])
-    ].forEach(processTask);
-    
+    [...(allTasks.monthly || []), ...Object.values(allTasks.history || {}).flat(), ...(allTasks.daily || [])].forEach(processTask);
     if (isCurrentPeriod) {
-        (allTasks.monthly || []).forEach(task => {
-            if (!task.completed && !allRelevantTasks.has(task.id)) {
-                allRelevantTasks.set(task.id, task);
-            }
-        });
+        (allTasks.monthly || []).forEach(task => { if (!task.completed) allRelevantTasks.set(task.id, task); });
     }
-
-    [
-        ...(allTasks.ledger || []),
-        ...(Object.values(allTasks.ledgerHistory || {})).flat()
-    ].forEach(entry => {
-        if (entry.date) {
-            const d = new Date(entry.date);
-            if (d >= startDate && d <= endDate) {
-                ledgerEntries.push(entry);
-            }
-        }
+    const ledgerEntries = [...(allTasks.ledger || []), ...Object.values(allTasks.ledgerHistory || {}).flat()].filter(entry => {
+        const d = new Date(entry.date + 'T00:00:00'); return d >= startDate && d <= endDate;
     });
-
     const tasks = Array.from(allRelevantTasks.values());
 
-    // 3. 将数据格式化为纯文本，并明确标注状态
+    // 3. 收集、计算和格式化指标数据
+    let metricsFormattedText = `\n## 关键指标回顾:\n`;
+    const metricDefs = allTasks.metrics.definitions || [];
+    
+    if (metricDefs.length > 0) {
+        // 【核心修复】重新构建 allMetricData 数组，确保每个数据点都包含其 metric ID
+        const allMetricData = [];
+        const metricsDataById = allTasks.metrics.data || {};
+        for (const metricId in metricsDataById) {
+            const dataPoints = metricsDataById[metricId] || [];
+            dataPoints.forEach(point => {
+                allMetricData.push({
+                    id: metricId, // <--- 关键！将 ID 重新附加到每个数据点上
+                    date: point.date,
+                    value: point.value
+                });
+            });
+        }
+
+        const getAverageForPeriod = (metricId, start, end) => {
+            if (!start || !end) return null;
+            const values = allMetricData
+                .filter(d => {
+                    const metricDate = new Date(d.date + 'T00:00:00'); 
+                    return d.id === metricId && metricDate >= start && metricDate <= end;
+                })
+                .map(d => d.value);
+            return values.length > 0 ? values.reduce((sum, val) => sum + val, 0) / values.length : null;
+        };
+
+        let hasMetricsData = false;
+        metricDefs.forEach(metric => {
+            const currentAvg = getAverageForPeriod(metric.id, startDate, endDate);
+            const prevAvg = getAverageForPeriod(metric.id, prevStartDate, prevEndDate);
+            const comparisonAvg = getAverageForPeriod(metric.id, comparisonStartDate, comparisonEndDate);
+
+            if (currentAvg !== null) {
+                hasMetricsData = true;
+                const comparisonLabel = reportType === 'daily_today' ? '周同比' : '同比';
+                let analysis = `- ${metric.name}: 本期均值 ${currentAvg.toFixed(2)}${metric.unit}`;
+                if (prevAvg !== null) {
+                    const diff = ((currentAvg - prevAvg) / (prevAvg === 0 ? 1 : prevAvg) * 100);
+                    analysis += `, 环比 ${diff >= 0 ? '+' : ''}${diff.toFixed(1)}%`;
+                }
+                if (comparisonAvg !== null) {
+                    const diff = ((currentAvg - comparisonAvg) / (comparisonAvg === 0 ? 1 : comparisonAvg) * 100);
+                    analysis += `, ${comparisonLabel} ${diff >= 0 ? '+' : ''}${diff.toFixed(1)}%`;
+                }
+                metricsFormattedText += `${analysis}\n`;
+            }
+        });
+        if (!hasMetricsData) {
+            metricsFormattedText += "- 本时段暂无指标数据。\n";
+        }
+    } else {
+        metricsFormattedText += "- 未设置任何追踪指标。\n";
+    }
+
+    // 4. 组合所有数据
     let formattedText = `## 任务清单:\n`;
     if (tasks.length > 0) {
         tasks.forEach(t => {
             const status = t.completed ? 'completed' : 'uncompleted';
             let taskLine = `- ${t.text} (status: ${status})`;
-            if (t.tags?.length > 0) {
-                taskLine += ` (tags: ${t.tags.join(', ')})`;
-            }
+            if (t.tags?.length > 0) taskLine += ` (tags: ${t.tags.join(', ')})`;
             formattedText += `${taskLine}\n`;
         });
     } else {
         formattedText += "- 本时段无相关任务。\n";
     }
 
+    formattedText += metricsFormattedText;
+
     if (ledgerEntries.length > 0) {
         const totalExpense = ledgerEntries.reduce((sum, e) => sum + (e.amount || 0), 0);
-        formattedText += `\n## 财务支出小结:\n`;
-        formattedText += `- 共 ${ledgerEntries.length} 笔支出，总计 ${allTasks.currencySymbol || '$'}${totalExpense.toFixed(2)}。\n`;
+        formattedText += `\n## 财务支出小结:\n- 共 ${ledgerEntries.length} 笔支出，总计 ${allTasks.currencySymbol || '$'}${totalExpense.toFixed(2)}。\n`;
     }
 
     return { title, data: formattedText };
@@ -4213,7 +4636,9 @@ async function handleAiProcess() {
 
     try {
         // 使用通用的 generateAIResponse 函数和默认的 SYSTEM_PROMPT
-        const parsedData = await aiAssistant.generateAIResponse(userInput, aiAssistant.SYSTEM_PROMPT);
+const systemPrompt = aiAssistant.getSystemPrompt();
+const parsedDataContent = await aiAssistant.generateAIResponse(userInput, systemPrompt);
+const parsedData = robustJsonParse(parsedDataContent); // 确保解析JSON
         if (parsedData) {
            aiPromptInput.value = ''; // 清空输入
             closeModal(aiAssistantModal); // **先关闭**AI助手模态框
@@ -4370,6 +4795,16 @@ function addAIParsedTask(parsedData) {
             if (!allTasks.daily) allTasks.daily = [];
             allTasks.daily.unshift(newTask);
             break;
+case 'metrics':
+            // 复用已有的 saveMetricValue 函数来保存数据
+            saveMetricValue(
+                // 我们需要根据名称找到指标的ID
+                allTasks.metrics.definitions.find(d => d.name === data.name)?.id,
+                data.date,
+                data.value
+            );
+            break;
+
     }
 
     saveTasks();
@@ -5095,6 +5530,19 @@ if (manualRefreshBtn) {
     if (annualReportBtn) annualReportBtn.addEventListener('click', openAnnualReportModal);
     if (currencyPickerBtn) currencyPickerBtn.addEventListener('click', openCurrencyPicker);
 
+ // 【核心修复】本月待办状态筛选事件监听
+    const monthlyTaskFilter = document.getElementById('monthly-task-filter');
+    if (monthlyTaskFilter) {
+        monthlyTaskFilter.addEventListener('click', (e) => {
+            if (e.target.tagName === 'BUTTON') {
+                currentMonthlyStatusFilter = e.target.dataset.filter;
+                monthlyTaskFilter.querySelector('.active').classList.remove('active');
+                e.target.classList.add('active');
+                renderAllLists(); // 触发重绘
+            }
+        });
+    }
+
     if (customPromptConfirmBtn) {
         customPromptConfirmBtn.addEventListener('click', () => {
             if(typeof currentPromptConfig.onConfirm === 'function') {
@@ -5131,6 +5579,51 @@ if (manualRefreshBtn) {
                 // openCustomPrompt({title:"错误", message:"无法打开统计分析，相关界面元素丢失。", inputType:'none', confirmText:'好的', hideCancelButton:true});
             }
         });
+    }
+
+    if (viewSwitcher) {
+        viewSwitcher.addEventListener('click', (e) => {
+            if (e.target.tagName === 'BUTTON') {
+                if (viewSwitcher.querySelector('.active')) {
+                    viewSwitcher.querySelector('.active').classList.remove('active');
+                }
+                e.target.classList.add('active');
+                renderDailySection();
+            }
+        });
+    }
+
+    if (metricsSettingsBtn) {
+        metricsSettingsBtn.addEventListener('click', openMetricsSettingsModal);
+    }
+    if (goToMetricsSettingsBtn) {
+        goToMetricsSettingsBtn.addEventListener('click', openMetricsSettingsModal);
+    }
+    if (metricsDataTableContainer) {
+        metricsDataTableContainer.addEventListener('change', (e) => {
+            if (e.target.classList.contains('metric-value-input')) {
+                const { metricId, date } = e.target.dataset;
+                saveMetricValue(metricId, date, e.target.value);
+            }
+        });
+    }
+
+    const metricsHistoryBtn = document.getElementById('metrics-history-btn');
+    if (metricsHistoryBtn) {
+        metricsHistoryBtn.addEventListener('click', () => openHistoryModal('metrics')); // We need to create this case in openHistoryModal
+    }
+
+    if (chartTimeDimension) {
+        chartTimeDimension.addEventListener('change', () => {
+            const selectedValue = chartTimeDimension.value;
+            selectedMetricsDisplayMonth = (selectedValue === 'currentMonth') ? 'current' : selectedValue;
+            renderMetricsDataTable();
+            renderMetricsChart();
+        });
+    }
+
+    if (refreshChartBtn) {
+        refreshChartBtn.addEventListener('click', renderMetricsChart);
     }
 
 if (aiSettingsBtn) {
@@ -5931,6 +6424,7 @@ if (!statsModal) {
     ledgerDetailsInput = document.getElementById('ledger-details-input');
     addLedgerBtn = document.getElementById('add-ledger-btn');
     monthlyTagsContainer = document.getElementById('monthly-tags-container');
+    monthlyTaskFilter = document.getElementById('monthly-task-filter');
     ledgerTagsContainer = document.getElementById('ledger-tags-container');
     ledgerSummaryContainer = document.getElementById('ledger-summary-container');
     monthlyHistoryBtn = document.getElementById('monthly-history-btn');
@@ -5991,6 +6485,21 @@ if (!statsModal) {
     aiPromptInput = document.getElementById('ai-prompt-input');
     aiProcessBtn = document.getElementById('ai-process-btn');
     aiLoadingSpinner = document.getElementById('ai-loading-spinner');
+    viewSwitcher = document.querySelector('.view-switcher');
+    showTasksViewBtn = document.getElementById('show-tasks-view-btn');
+    showMetricsViewBtn = document.getElementById('show-metrics-view-btn');
+    dailyTasksView = document.getElementById('daily-tasks-view');
+    dailyMetricsView = document.getElementById('daily-metrics-view');
+    metricsControls = document.getElementById('metrics-controls');
+    metricsSettingsBtn = document.getElementById('metrics-settings-btn');
+    metricsProjectPills = document.getElementById('metrics-project-pills');
+    metricsChartContainer = document.getElementById('metrics-chart-container');
+    chartTimeDimension = document.getElementById('chart-time-dimension');
+    refreshChartBtn = document.getElementById('refresh-chart-btn');
+    metricsChartCanvas = document.getElementById('metrics-chart');
+    metricsDataTableContainer = document.getElementById('metrics-data-table-container');
+    metricsInitialSetupPrompt = document.getElementById('metrics-initial-setup-prompt');
+    goToMetricsSettingsBtn = document.getElementById('go-to-metrics-settings-btn');
     
     console.log("initializeApp: 所有 DOM 元素已获取。");
 
