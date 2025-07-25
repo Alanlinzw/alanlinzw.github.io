@@ -1117,22 +1117,33 @@ async function loadTasks(callback) {
         data = await db.get('allTasks');
     } catch (error) {
         console.error("[PWA] Error loading tasks from DB:", error);
-allTasks = { daily: [], monthly: [], future: [], ledger: [], history: {}, ledgerHistory: {}, budgets: {}, currencySymbol: '$', lastUpdatedLocal: 0, lastDailyResetDate: '1970-01-01', metrics: { projects: [], definitions: [], data: {} } };
+        // 如果数据库读取失败，创建一个全新的、完整的默认对象
+        allTasks = { daily: [], monthly: [], future: [], ledger: [], history: {}, ledgerHistory: {}, budgets: {}, currencySymbol: '$', lastUpdatedLocal: 0, lastDailyResetDate: '1970-01-01', metrics: { projects: [], definitions: [], data: {} } };
         await saveTasks();
         if (callback) callback();
         return;
     }
     
+    // 默认的、最完整的应用数据结构
+    const defaultStructure = { 
+        daily: [], monthly: [], future: [], ledger: [], 
+        history: {}, ledgerHistory: {}, budgets: {}, 
+        currencySymbol: '$', lastUpdatedLocal: 0, lastDailyResetDate: '1970-01-01', 
+        metrics: { projects: [], definitions: [], data: {} } 
+    };
+
     if (data && typeof data === 'object') {
         allTasks = data;
-        const defaultStructure = { daily: [], monthly: [], future: [], ledger: [], history: {}, ledgerHistory: {}, budgets: {}, currencySymbol: '$', lastUpdatedLocal: 0, lastDailyResetDate: '1970-01-01' };
+        // 【核心修复】遍历最完整的默认结构，确保 allTasks 对象包含所有必需的键，特别是 'metrics'
         for (const key in defaultStructure) {
             if (!allTasks.hasOwnProperty(key)) {
+                console.log(`Data migration: Adding missing key '${key}' to allTasks.`);
                 allTasks[key] = defaultStructure[key];
             }
         }
     } else {
-        allTasks = { daily: [], monthly: [], future: [], ledger: [], history: {}, ledgerHistory: {}, budgets: {}, currencySymbol: '$', lastUpdatedLocal: 0, lastDailyResetDate: '1970-01-01' };
+        // 如果没有数据，直接使用完整的默认结构
+        allTasks = { ...defaultStructure };
         await saveTasks();
     }
     if (callback) callback();
