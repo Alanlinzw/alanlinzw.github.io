@@ -1129,7 +1129,9 @@ async function loadTasks(callback) {
         daily: [], monthly: [], future: [], ledger: [], 
         history: {}, ledgerHistory: {}, budgets: {}, 
         currencySymbol: '$', lastUpdatedLocal: 0, lastDailyResetDate: '1970-01-01', 
-        metrics: { projects: [], definitions: [], data: {} } 
+        metrics: { projects: [], definitions: [], data: {} } ,
+                notes: [],
+        noteFolders: []
     };
 
     if (data && typeof data === 'object') {
