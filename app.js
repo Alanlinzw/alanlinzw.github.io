@@ -1713,7 +1713,8 @@ function handleLedgerImport(event) {
                     item: row[1], 
                     amount: parseFloat(row[2]), 
                     payment: row[3] || '', 
-                    details: row[4] || '' 
+                    details: row[4] || '' ,
+                    invoiceIds: []
                 };
                 if (typeof newEntry.date === 'number') {
                     const excelEpoch = new Date(1899, 11, 30); 
@@ -4787,8 +4788,9 @@ function addAIParsedTask(parsedData) {
                 item: data.item,
                 amount: data.amount,
                 payment: data.payment || '',
-                details: ''
-            };
+                details: '',
+                invoiceIds: []
+           };
             if (!allTasks.ledger) allTasks.ledger = [];
             allTasks.ledger.unshift(newTask);
             break;
@@ -5494,7 +5496,7 @@ if (manualRefreshBtn) {
                 return;
             }
             if (!allTasks.ledger) allTasks.ledger = []; 
-            allTasks.ledger.unshift({ date, item, amount, payment, details }); 
+            allTasks.ledger.unshift({ date, item, amount, payment, details, invoiceIds: []}); 
             ledgerDateInput.valueAsDate = new Date(); 
             ledgerItemInput.value = ''; 
             ledgerAmountInput.value = ''; 
